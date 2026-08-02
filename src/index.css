@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-heading: 'Outfit', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #080c14;
+    color: #f1f5f9;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+
+  code, pre {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Glassmorphism & Custom UI Styles */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Header & Nav Button Hover Styles */
+.btn-poker-nav {
+  background-color: #0f172a;
+  border: 1.5px solid #334155;
+  color: #f1f5f9;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.btn-poker-nav:hover {
+  background-color: #1e293b !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.5) !important;
+  transform: translateY(-1.5px) scale(1.03) !important;
+}
+
+/* Decision Action Button Hover States */
+.btn-poker-fold {
+  background-color: rgba(225, 29, 72, 0.15);
+  border: 2px solid rgba(244, 63, 94, 0.4);
+  color: #fb7185;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.btn-poker-fold:hover {
+  background-color: #e11d48 !important;
+  border-color: #ffe4e6 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 25px rgba(225, 29, 72, 0.6) !important;
+  transform: translateY(-2px) scale(1.03) !important;
+}
+.btn-poker-fold:active {
+  transform: translateY(0) scale(0.97) !important;
+}
+
+.btn-poker-call {
+  background-color: rgba(2, 132, 199, 0.15);
+  border: 2px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.btn-poker-call:hover {
+  background-color: #0284c7 !important;
+  border-color: #e0f2fe !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 25px rgba(2, 132, 199, 0.6) !important;
+  transform: translateY(-2px) scale(1.03) !important;
+}
+.btn-poker-call:active {
+  transform: translateY(0) scale(0.97) !important;
+}
+
+.btn-poker-check {
+  background-color: rgba(37, 99, 235, 0.15);
+  border: 2px solid rgba(96, 165, 250, 0.4);
+  color: #60a5fa;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.btn-poker-check:hover {
+  background-color: #2563eb !important;
+  border-color: #eff6ff !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 25px rgba(37, 99, 235, 0.6) !important;
+  transform: translateY(-2px) scale(1.03) !important;
+}
+.btn-poker-check:active {
+  transform: translateY(0) scale(0.97) !important;
+}
+
+.btn-poker-bet {
+  background-color: rgba(5, 150, 105, 0.2);
+  border: 2px solid rgba(52, 211, 153, 0.5);
+  color: #34d399;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.btn-poker-bet:hover {
+  background-color: #059669 !important;
+  border-color: #ecfdf5 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.7) !important;
+  transform: translateY(-2px) scale(1.03) !important;
+}
+.btn-poker-bet:active {
+  transform: translateY(0) scale(0.97) !important;
+}
+
+.btn-poker-preset {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.btn-poker-preset:hover {
+  background-color: #1e293b !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.4) !important;
+  transform: translateY(-1px) !important;
+}
+.btn-poker-preset-active {
+  background-color: #10b981 !important;
+  border-color: #6ee7b7 !important;
+  color: #022c22 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.5) !important;
+}
+
+/* Settings Modal Button Options */
+.btn-setting-option {
+  background-color: #0f172a;
+  border: 1.5px solid #334155;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+.btn-setting-option:hover {
+  background-color: #1e293b !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.4) !important;
+  transform: translateY(-1.5px) scale(1.02) !important;
+}
+.btn-setting-option-active {
+  background-color: #059669 !important;
+  border-color: #34d399 !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.5) !important;
+}
+
+/* Floating Log Download Buttons Hover Animations */
+.btn-log-download-emerald {
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-log-download-emerald:hover {
+  transform: translateY(-2px) scale(1.06) !important;
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.6) !important;
+  border-color: #34d399 !important;
+  background-color: #064e3b !important;
+  color: #ffffff !important;
+}
+.btn-log-download-emerald:active {
+  transform: translateY(0) scale(0.96) !important;
+}
+
+.btn-log-download-cyan {
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-log-download-cyan:hover {
+  transform: translateY(-2px) scale(1.06) !important;
+  box-shadow: 0 0 25px rgba(6, 182, 212, 0.6) !important;
+  border-color: #22d3ee !important;
+  background-color: #083344 !important;
+  color: #ffffff !important;
+}
+.btn-log-download-cyan:active {
+  transform: translateY(0) scale(0.96) !important;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #080c14;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
