@@ -1,5 +1,5 @@
 import React from 'react';
-import { Award, Zap, Flame, Settings, Grid, RotateCcw, Layers } from 'lucide-react';
+import { Award, Zap, Flame, Settings, Grid, RotateCcw, Layers, Sparkles } from 'lucide-react';
 import { SessionStats } from '../pedagogy/gtoScoreEngine';
 
 interface LiveHudDashboardProps {
@@ -8,6 +8,7 @@ interface LiveHudDashboardProps {
   playerCount: number;
   onOpenSettings: () => void;
   onOpenSolutionBrowser: () => void;
+  onOpenSandbox: () => void;
   onResetSession: () => void;
 }
 
@@ -17,6 +18,7 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
   playerCount,
   onOpenSettings,
   onOpenSolutionBrowser,
+  onOpenSandbox,
   onResetSession
 }) => {
   const getGtoScoreBadgeColor = (score: number) => {
@@ -37,8 +39,11 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
             <h1 className="font-extrabold text-lg tracking-tight text-white font-heading">
               GTO POKER TRAINER
             </h1>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
-              {playerCount} Players | {difficultyMode} Mode
+            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300">
+              PRACTICE MODE 🛠️
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hidden md:inline">
+              {playerCount} Players | {difficultyMode}
             </span>
           </div>
           <p className="text-xs text-slate-400 font-medium">Real-Time EV Loss & Nash Strategy Feedback</p>
@@ -48,34 +53,24 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
       {/* Live HUD Stats */}
       <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
         {/* Hands Played */}
-        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 transition-all duration-200 hover:scale-105 hover:border-slate-700 shadow-md">
+        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800">
           <Layers className="w-4 h-4 text-cyan-400" />
           <div className="flex flex-col">
             <span className="text-[10px] text-slate-400 uppercase font-semibold">Hands</span>
-            <span className="text-sm font-extrabold text-cyan-300 font-mono">
-              {stats.handsPlayed}
-            </span>
+            <span className="text-sm font-bold text-white font-mono">{stats.handsPlayed}</span>
           </div>
         </div>
 
-        {/* GTO Score Badge */}
-        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 transition-all duration-200 hover:scale-105 hover:border-slate-700 shadow-md">
+        {/* GTO Score */}
+        <div className="flex items-center gap-2 bg-slate-900/80 px-3.5 py-1.5 rounded-xl border border-slate-800 shadow-inner">
           <Award className="w-4 h-4 text-emerald-400" />
           <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold">GTO Score</span>
-            <span className={`text-sm font-extrabold px-2 py-0.5 rounded-md bg-gradient-to-r ${getGtoScoreBadgeColor(stats.gtoScorePercent)}`}>
-              {stats.gtoScorePercent}%
-            </span>
-          </div>
-        </div>
-
-        {/* EV Lost */}
-        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 transition-all duration-200 hover:scale-105 hover:border-slate-700 shadow-md">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold">Session EV Loss</span>
-            <span className={`text-sm font-mono font-bold ${stats.totalEvLossBB > 2.0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-              -{stats.totalEvLossBB} BB
-            </span>
+            <span className="text-[10px] text-slate-400 uppercase font-semibold">GTO Rating</span>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-xs font-black px-2 py-0.5 rounded-md bg-gradient-to-r ${getGtoScoreBadgeColor(stats.gtoScorePercent)}`}>
+                {stats.gtoScorePercent}%
+              </span>
+            </div>
           </div>
         </div>
 
@@ -94,8 +89,16 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
       {/* Action Buttons with High-Contrast Hover Styles */}
       <div className="flex items-center gap-2">
         <button
+          onClick={onOpenSandbox}
+          className="btn-poker-nav flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold shadow-md transition-all duration-200 hover:scale-105 active:scale-95 border-purple-500/30 text-purple-300 hover:text-purple-200"
+        >
+          <Sparkles className="w-4 h-4 text-purple-400" />
+          <span className="hidden sm:inline">Sandbox & Cheats</span>
+        </button>
+
+        <button
           onClick={onOpenSolutionBrowser}
-          className="btn-poker-nav flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold shadow-md transition-all duration-200 hover:scale-105 active:scale-95"
+          className="btn-poker-nav flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold shadow-md transition-all duration-200 hover:scale-105 active:scale-95"
         >
           <Grid className="w-4 h-4 text-emerald-400" />
           <span className="hidden sm:inline">13x13 Solutions</span>
@@ -103,7 +106,7 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
 
         <button
           onClick={onOpenSettings}
-          className="btn-poker-nav flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold shadow-md transition-all duration-200 hover:scale-105 active:scale-95"
+          className="btn-poker-nav flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold shadow-md transition-all duration-200 hover:scale-105 active:scale-95"
         >
           <Settings className="w-4 h-4 text-cyan-400" />
           <span className="hidden sm:inline">Settings</span>

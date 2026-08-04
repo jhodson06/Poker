@@ -2,14 +2,78 @@ import React, { useEffect, useRef } from 'react';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { TableState } from '../engine/stateMachine';
-import { SUIT_SYMBOLS, RANKS } from '../engine/card';
+import { Card, SUIT_SYMBOLS, RANKS } from '../engine/card';
 import { evaluate7Cards } from '../engine/evaluator';
 
 interface PokerTableCanvasProps {
   tableState: TableState;
+  revealAllCards?: boolean;
+  showEquityOverlays?: boolean;
 }
 
-export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({ tableState }) => {
+function getRawPreflopEquity(c1Val: number, c2Val: number, isSuited: boolean): number {
+  const highVal = Math.max(c1Val, c2Val);
+  const lowVal = Math.min(c1Val, c2Val);
+  const isPair = c1Val === c2Val;
+
+  if (isPair) return Math.round(50 + highVal * 2.8);
+  let base = highVal * 2.2 + lowVal * 1.4;
+  if (isSuited) base += 4;
+  if (highVal - lowVal <= 2) base += 3;
+  return Math.min(85, Math.max(22, Math.round(base)));
+}
+
+function calculateTableEquities(state: TableState): Map<number, number> {
+  const equityMap = new Map<number, number>();
+  const activePlayers = state.players.filter(p => !p.isFolded && p.holeCards.length === 2);
+
+  if (activePlayers.length === 0) return equityMap;
+  if (activePlayers.length === 1) {
+    equityMap.set(activePlayers[0].seatIndex, 100);
+    return equityMap;
+  }
+
+  const rawWeights: { seatIndex: number; weight: number }[] = [];
+
+  activePlayers.forEach(p => {
+    const c1 = p.holeCards[0];
+    const c2 = p.holeCards[1];
+    let weight = 50;
+
+    if (!state.communityCards || state.communityCards.length < 3) {
+      const isSuited = c1.suit === c2.suit;
+      weight = getRawPreflopEquity(c1.value, c2.value, isSuited);
+    } else {
+      const evalResult = evaluate7Cards([...p.holeCards, ...state.communityCards]);
+      const relStr = Math.max(1, (10000000 - evalResult.score) / 100000);
+      weight = relStr * relStr;
+    }
+
+    rawWeights.push({ seatIndex: p.seatIndex, weight });
+  });
+
+  const totalWeight = rawWeights.reduce((sum, item) => sum + item.weight, 0);
+  if (totalWeight <= 0) return equityMap;
+
+  let sumEq = 0;
+  rawWeights.forEach((item, idx) => {
+    let eq = Math.round((item.weight / totalWeight) * 100);
+    if (idx === rawWeights.length - 1) {
+      eq = Math.max(1, 100 - sumEq);
+    } else {
+      sumEq += eq;
+    }
+    equityMap.set(item.seatIndex, eq);
+  });
+
+  return equityMap;
+}
+
+export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({
+  tableState,
+  revealAllCards = false,
+  showEquityOverlays = false
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<PIXI.Application | null>(null);
 
@@ -19,19 +83,20 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({ tableState }
     const app = new PIXI.Application();
     let isDestroyed = false;
 
-    // Fixed Virtual Canvas Size: 1000 x 560
+    // Virtual Canvas Size: 1000 x 560 with High-DPI autoDensity scaling
     app.init({
       width: 1000,
       height: 560,
       backgroundColor: 0x080c14,
       antialias: true,
-      resolution: window.devicePixelRatio || 1
+      resolution: Math.max(window.devicePixelRatio || 1, 2),
+      autoDensity: true
     }).then(() => {
       if (isDestroyed || !containerRef.current) return;
 
       app.canvas.style.width = '100%';
-      app.canvas.style.height = 'auto';
-      app.canvas.style.maxHeight = '560px';
+      app.canvas.style.height = '100%';
+      app.canvas.style.objectFit = 'contain';
       app.canvas.style.display = 'block';
 
       containerRef.current.appendChild(app.canvas);
@@ -198,7 +263,7 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({ tableState }
       );
 
       if (shouldRenderHoleCards) {
-        const isShowable = player.isHuman || state.street === 'showdown';
+        const isShowable = player.isHuman || state.street === 'showdown' || revealAllCards;
 
         const cardW = player.isHuman ? 48 : 36;
         const cardH = player.isHuman ? 68 : 50;
@@ -323,6 +388,37 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({ tableState }
       stackText.anchor.set(0.5);
       stackText.y = 50;
       seatGroup.addChild(stackText);
+
+      // --- LIVE EQUITY OVERLAY BADGE (TV BROADCAST IF GOD MODE ON, HERO ONLY IF GOD MODE OFF) ---
+      if (showEquityOverlays && !player.isFolded && player.holeCards.length === 2) {
+        const shouldShowThisSeat = revealAllCards || player.isHuman;
+
+        if (shouldShowThisSeat) {
+          const tableEquities = calculateTableEquities(state);
+          const eqVal = tableEquities.get(player.seatIndex) || 0;
+          const eqBadgeGroup = new PIXI.Container();
+          eqBadgeGroup.y = -26;
+
+          const eqBg = new PIXI.Graphics();
+          eqBg.roundRect(-28, -9, 56, 18, 9);
+          eqBg.fill({ color: 0x064e3b, alpha: 0.95 });
+          eqBg.stroke({ color: 0x34d399, width: 1.5 });
+
+          const eqText = new PIXI.Text({
+            text: `${eqVal}% EQ`,
+            style: {
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: 10,
+              fontWeight: '900',
+              fill: 0x34d399
+            }
+          });
+          eqText.anchor.set(0.5);
+
+          eqBadgeGroup.addChild(eqBg, eqText);
+          seatGroup.addChild(eqBadgeGroup);
+        }
+      }
 
       // --- SUBTLE HERO HAND RANK BADGE (PERSISTS AFTER FOLD AT Y = 90) ---
       if (player.isHuman && player.holeCards.length === 2) {
@@ -567,10 +663,10 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({ tableState }
   };
 
   return (
-    <div className="w-full flex justify-center items-center py-1">
+    <div className="w-full h-full flex justify-center items-center overflow-hidden p-1">
       <div
         ref={containerRef}
-        className="w-full max-w-5xl rounded-3xl overflow-hidden glass-panel shadow-2xl border border-slate-800 flex justify-center items-center"
+        className="relative max-w-full max-h-full aspect-[1000/560] glass-panel border border-slate-800/80 shadow-2xl rounded-3xl overflow-hidden flex justify-center items-center shrink-0"
       />
     </div>
   );

@@ -78,7 +78,7 @@ export function sampleOpponentAiAction(state: TableState): AiDecision {
     }
 
     action = 'raise';
-    amount = state.currentHighBet === 0 ? state.bigBlind * 3 : state.currentHighBet * 2.5;
+    amount = Math.round(state.currentHighBet === 0 ? state.bigBlind * 3 : state.currentHighBet * 2.5);
   } else if (chosen.action === 'allin') {
     action = 'raise';
     amount = player.chips + player.currentBet;

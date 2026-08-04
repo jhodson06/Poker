@@ -1,16 +1,18 @@
 import React from 'react';
-import { X, Sliders, Users, Shield, Layers, Coins } from 'lucide-react';
+import { X, Sliders, Users, Shield, Layers, Coins, Target } from 'lucide-react';
 import { StackResetMode } from '../engine/stateMachine';
 
 interface SettingsModalProps {
   playerCount: number;
-  difficultyMode: 'simple' | 'grouped' | 'standard';
+  difficultyMode: 'simple' | 'standard';
   startingStackBB: number;
   stackResetMode: StackResetMode;
+  isStrictStrategy: boolean;
   onChangePlayerCount: (count: number) => void;
-  onChangeDifficultyMode: (mode: 'simple' | 'grouped' | 'standard') => void;
+  onChangeDifficultyMode: (mode: 'simple' | 'standard') => void;
   onChangeStackBB: (stack: number) => void;
   onChangeStackResetMode: (mode: StackResetMode) => void;
+  onChangeStrictStrategy: (enabled: boolean) => void;
   onClose: () => void;
 }
 
@@ -19,10 +21,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   difficultyMode,
   startingStackBB,
   stackResetMode,
+  isStrictStrategy,
   onChangePlayerCount,
   onChangeDifficultyMode,
   onChangeStackBB,
   onChangeStackResetMode,
+  onChangeStrictStrategy,
   onClose
 }) => {
   return (
@@ -127,11 +131,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 mt-1">
+          <div className="grid grid-cols-2 gap-2 mt-1">
             {[
-              { mode: 'simple', title: 'SIMPLE', desc: 'Bet / Check / Fold' },
-              { mode: 'grouped', title: 'GROUPED', desc: 'Broad Categories' },
-              { mode: 'standard', title: 'STANDARD', desc: 'Exact GTO Sizing' }
+              { mode: 'simple', title: 'SIMPLE MODE', desc: 'Fold / Call / Bet-Raise Line Focus' },
+              { mode: 'standard', title: 'STANDARD GTO', desc: 'Exact Sizing (33%, 75%, 2.5x, All-In)' }
             ].map(m => (
               <button
                 key={m.mode}
@@ -144,6 +147,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span className="text-[10px] opacity-80 font-medium">{m.desc}</span>
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Setting 4: Strict Pure Strategy Mode */}
+        <div className="flex flex-col gap-2.5 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-bold text-white">
+              <Target className="w-4 h-4 text-rose-400" />
+              <span>Strict Pure Strategy Mode</span>
+            </div>
+            <span
+              className={`text-xs font-mono font-bold uppercase px-2.5 py-1 rounded-md border ${
+                isStrictStrategy
+                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              {isStrictStrategy ? 'STRICT PURE 🎯' : 'STANDARD MIX'}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400">
+            When enabled, only the single best optimal action (or dual ~40% split options) is graded as Correct. Minor mixed options are penalized.
+          </p>
+
+          <div className="grid grid-cols-2 gap-2.5 mt-1">
+            <button
+              onClick={() => onChangeStrictStrategy(false)}
+              className={`p-3 rounded-xl flex flex-col items-center gap-1 text-center transition-all ${
+                !isStrictStrategy ? 'btn-setting-option-active' : 'btn-setting-option'
+              }`}
+            >
+              <span className="text-xs font-black">STANDARD MIX</span>
+              <span className="text-[10px] opacity-80 font-medium">Allows GTO Mixed Lines (&gt;5%)</span>
+            </button>
+            <button
+              onClick={() => onChangeStrictStrategy(true)}
+              className={`p-3 rounded-xl flex flex-col items-center gap-1 text-center transition-all ${
+                isStrictStrategy
+                  ? 'bg-rose-600 text-white font-extrabold shadow-lg shadow-rose-600/30 border border-rose-400'
+                  : 'btn-setting-option'
+              }`}
+            >
+              <span className="text-xs font-black">STRICT PURE 🎯</span>
+              <span className="text-[10px] opacity-80 font-medium">Single Best Action Only</span>
+            </button>
           </div>
         </div>
 

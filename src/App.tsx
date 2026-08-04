@@ -13,12 +13,14 @@ import { getGtoStrategyForState, GtoNodeStrategy } from './gto/strategyDatabase'
 import { evaluateUserDecision, DecisionGrading } from './pedagogy/evCalculator';
 import { SessionStats, createInitialSessionStats, recordDecision, recordHandCompleted } from './pedagogy/gtoScoreEngine';
 
+import { parseCard, Card } from './engine/card';
 import { LiveHudDashboard } from './components/LiveHudDashboard';
 import { PokerTableCanvas } from './components/PokerTableCanvas';
 import { ActionControls } from './components/ActionControls';
 import { FeedbackOverlay } from './components/FeedbackOverlay';
 import { SolutionBrowser } from './components/SolutionBrowser';
 import { SettingsModal } from './components/SettingsModal';
+import { SandboxModal } from './components/SandboxModal';
 import { Download } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -120,9 +122,10 @@ function downloadTxt(filename: string, content: string) {
 
 export const App: React.FC = () => {
   const [playerCount, setPlayerCount] = useState<number>(6);
-  const [difficultyMode, setDifficultyMode] = useState<'simple' | 'grouped' | 'standard'>('simple');
+  const [difficultyMode, setDifficultyMode] = useState<'simple' | 'standard'>('simple');
   const [startingStackBB, setStartingStackBB] = useState<number>(100);
   const [stackResetMode, setStackResetMode] = useState<StackResetMode>('persistent');
+  const [isStrictStrategy, setIsStrictStrategy] = useState<boolean>(false);
 
   const [tableState, setTableState] = useState<TableState>(() =>
     startNewHand(createInitialTableState(6, 100, 'persistent'))
@@ -137,7 +140,13 @@ export const App: React.FC = () => {
   const [activeStrategy, setActiveStrategy] = useState<GtoNodeStrategy | null>(null);
 
   const [isSolutionBrowserOpen, setIsSolutionBrowserOpen] = useState<boolean>(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(true);
+  const [isSandboxOpen, setIsSandboxOpen] = useState<boolean>(false);
+
+  // Practice Mode Cheat Tools
+  const [revealAllCards, setRevealAllCards] = useState<boolean>(false);
+  const [showEquityOverlays, setShowEquityOverlays] = useState<boolean>(false);
+  const [forcedHeroCards, setForcedHeroCards] = useState<[string, string] | null>(null);
 
   // Diagnostic log refs
   const handNumberRef = useRef<number>(0);
@@ -374,8 +383,8 @@ export const App: React.FC = () => {
       tableState.communityCards
     );
 
-    // 2. Evaluate Decision EV Loss & Grade (with session over-frequency leak tracking!)
-    const grading = evaluateUserDecision(actionType, amount, strategyNode, sessionStats, tableState.pot, difficultyMode);
+    // 2. Evaluate Decision EV Loss & Grade (with strict mode check & frequency leak tracking!)
+    const grading = evaluateUserDecision(actionType, amount, strategyNode, sessionStats, tableState.pot, difficultyMode, isStrictStrategy);
 
     // 3. Update Session Analytics Stats
     setSessionStats(prev => recordDecision(prev, grading));
@@ -402,8 +411,11 @@ export const App: React.FC = () => {
     setActiveGrading(null);
     setActiveStrategy(null);
     setSessionStats(prev => recordHandCompleted(prev));
+    const parsedForced = forcedHeroCards
+      ? ([parseCard(forcedHeroCards[0]), parseCard(forcedHeroCards[1])] as [Card, Card])
+      : null;
     setTableState(prev => {
-      const next = startNewHand(prev);
+      const next = startNewHand(prev, parsedForced);
       initCurrentHand(next);
       return next;
     });
@@ -439,22 +451,31 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-emerald-500 selection:text-slate-950">
+    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col justify-between overflow-hidden selection:bg-emerald-500 selection:text-slate-950">
       {/* Live HUD Header */}
-      <LiveHudDashboard
-        stats={sessionStats}
-        difficultyMode={difficultyMode}
-        playerCount={playerCount}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenSolutionBrowser={() => setIsSolutionBrowserOpen(true)}
-        onResetSession={handleResetSession}
-      />
+      <div className="shrink-0">
+        <LiveHudDashboard
+          stats={sessionStats}
+          difficultyMode={difficultyMode}
+          playerCount={playerCount}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSolutionBrowser={() => setIsSolutionBrowserOpen(true)}
+          onOpenSandbox={() => setIsSandboxOpen(true)}
+          onResetSession={handleResetSession}
+        />
+      </div>
 
       {/* Main Gameplay Table Canvas */}
-      <main className="flex-1 flex flex-col items-center justify-center p-2 sm:p-4 relative">
-        <PokerTableCanvas tableState={tableState} />
+      <main className="flex-1 min-h-0 w-full max-w-[1800px] mx-auto p-2 sm:p-3 flex items-center justify-center overflow-hidden">
+        <PokerTableCanvas
+          tableState={tableState}
+          revealAllCards={revealAllCards}
+          showEquityOverlays={showEquityOverlays}
+        />
+      </main>
 
-        {/* Hero Action Controls */}
+      {/* Hero Action Controls */}
+      <div className="shrink-0 w-full p-2 sm:pb-3">
         <ActionControls
           tableState={tableState}
           difficultyMode={difficultyMode}
@@ -462,7 +483,7 @@ export const App: React.FC = () => {
           onAction={handleHeroAction}
           onNextHand={handleNextHand}
         />
-      </main>
+      </div>
 
       {/* Post-Hand Download Log Buttons — available at showdown */}
       {tableState.street === 'showdown' && (
@@ -495,6 +516,19 @@ export const App: React.FC = () => {
         />
       )}
 
+      {/* Practice Mode Sandbox & Cheat Menu Modal */}
+      {isSandboxOpen && (
+        <SandboxModal
+          revealAllCards={revealAllCards}
+          showEquityOverlays={showEquityOverlays}
+          forcedHeroCards={forcedHeroCards}
+          onToggleRevealCards={setRevealAllCards}
+          onToggleEquityOverlays={setShowEquityOverlays}
+          onSetForcedHeroCards={setForcedHeroCards}
+          onClose={() => setIsSandboxOpen(false)}
+        />
+      )}
+
       {/* 13x13 GTO Solution Browser Modal */}
       {isSolutionBrowserOpen && (
         <SolutionBrowser
@@ -510,10 +544,12 @@ export const App: React.FC = () => {
           difficultyMode={difficultyMode}
           startingStackBB={startingStackBB}
           stackResetMode={stackResetMode}
+          isStrictStrategy={isStrictStrategy}
           onChangePlayerCount={handlePlayerCountChange}
           onChangeDifficultyMode={setDifficultyMode}
           onChangeStackBB={handleStackBBChange}
           onChangeStackResetMode={handleStackResetModeChange}
+          onChangeStrictStrategy={setIsStrictStrategy}
           onClose={() => setIsSettingsOpen(false)}
         />
       )}

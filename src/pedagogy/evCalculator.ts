@@ -27,7 +27,8 @@ export function evaluateUserDecision(
   strategy: GtoNodeStrategy,
   sessionStats?: SessionStats,
   potSize?: number,
-  mode?: 'simple' | 'grouped' | 'standard'
+  mode?: 'simple' | 'standard',
+  isStrictStrategy: boolean = false
 ): DecisionGrading {
   const freqs = strategy.frequencies;
   const optimalAction = strategy.optimalAction;
@@ -104,6 +105,33 @@ export function evaluateUserDecision(
   let badgeBgClass = 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400';
   let badgeTextClass = 'text-emerald-400';
   let explanation = 'Optimal play! Action matches GTO strategy frequencies.';
+
+  // Strict Pure Strategy Enforcement Mode Check
+  if (isStrictStrategy) {
+    const sorted = [...freqs].sort((a, b) => b.frequency - a.frequency);
+    const top1 = sorted[0];
+    const top2 = sorted[1];
+
+    const isTop1 = userFreqItem.action === top1.action || userFreqItem.label === top1.label;
+    const isTop2Split = top2 && top2.frequency >= 0.35 && (userFreqItem.action === top2.action || userFreqItem.label === top2.label);
+
+    if (!isTop1 && !isTop2Split) {
+      const topLabel = top2 && top2.frequency >= 0.35 ? `${top1.label} / ${top2.label}` : top1.label;
+      return {
+        userActionLabel: effectiveUserLabel,
+        userActionFreq: userFreqItem.frequency,
+        userEv,
+        optimalEv,
+        evLoss: Math.max(0.5, rawEvLoss),
+        grade: rawEvLoss >= 2.0 ? 'Mistake' : 'Inaccuracy',
+        colorHex: rawEvLoss >= 2.0 ? '#ef4444' : '#f59e0b',
+        badgeBgClass: rawEvLoss >= 2.0 ? 'bg-rose-500/20 border-rose-500/40 text-rose-400' : 'bg-amber-500/20 border-amber-500/40 text-amber-400',
+        badgeTextClass: rawEvLoss >= 2.0 ? 'text-rose-400' : 'text-amber-400',
+        explanation: `Strict Mode Active: Only the primary optimal action (${topLabel}) is permitted as Correct. Mixing ${userFreqItem.label} (${userFreqPercent.toFixed(0)}%) is rated Suboptimal in Strict Mode.`,
+        optimalActionLabel: top1.label
+      };
+    }
+  }
 
   // Rule 1: High Frequency Choices (>= 25%) are ALWAYS 100% CORRECT
   if (userFreqItem.frequency >= ALWAYS_CORRECT_FREQUENCY_THRESHOLD) {

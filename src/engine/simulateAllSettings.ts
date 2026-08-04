@@ -63,37 +63,45 @@ playerCounts.forEach(count => {
             state.communityCards
           );
           const grading = evaluateUserDecision(aiDecision.action, aiDecision.amount, strategyNode);
-          if (!grading || !grading.grade) {
-            console.error(`  ❌ Decision Grading Error on Hand ${h}`);
+          if (!grading || !grading.grade || !['Correct', 'Inaccuracy', 'Mistake', 'Blunder'].includes(grading.grade)) {
+            console.error(`  ❌ Decision Grading Error on Hand ${h}: Invalid grade ${grading?.grade}`);
             settingErrors++;
           }
         }
 
-        // 4. Advance State
+        // 4. Advance State & Verify Invariant Conservation
+        const beforeChips = state.pot + state.players.reduce((sum, p) => sum + p.chips, 0);
         state = executePlayerAction(state, aiDecision.seatIndex, aiDecision.action, aiDecision.amount);
-      }
+        const afterChips = state.pot + state.players.reduce((sum, p) => sum + p.chips, 0);
 
-      // 5. Verify Chip Conservation
-      const totalChips = state.players.reduce((sum, p) => sum + p.chips, 0);
-      const expectedTotalChips = count * stack * state.bigBlind;
-      if (totalChips !== expectedTotalChips) {
-        console.error(`  ❌ Chip Conservation Failure! Total: ${totalChips}, Expected: ${expectedTotalChips}`);
-        settingErrors++;
-      }
+        if (beforeChips !== afterChips) {
+          console.error(`  ❌ Action Execution Chip Leak! Before: ${beforeChips}, After: ${afterChips}`);
+          settingErrors++;
+        }
+      } // end while
 
-      // 6. Showdown Evaluation Ranking Test
-      if (state.street === 'showdown' && state.communityCards.length >= 5) {
-        const active = state.players.filter(p => !p.isFolded);
-        if (active.length >= 2) {
-          const evals = active.map(p => evaluate7Cards([...p.holeCards, ...state.communityCards]));
-          evals.sort((a, b) => a.score - b.score);
-          if (evals[0].score > evals[evals.length - 1].score) {
-            console.error(`  ❌ Showdown Evaluator Rank Error! Score order inverted.`);
+      // 5. Showdown Hand Evaluation & Winner Soundness Assertion
+      if (state.street === 'showdown' && state.winners && state.winners.length > 0) {
+        const active = state.players.filter(p => !p.isFolded && p.holeCards.length === 2);
+        if (active.length >= 2 && state.communityCards.length >= 5) {
+          const evals = active.map(p => ({
+            seatIndex: p.seatIndex,
+            eval: evaluate7Cards([...p.holeCards, ...state.communityCards])
+          }));
+          evals.sort((a, b) => a.eval.score - b.eval.score);
+          const topScore = evals[0].eval.score;
+          const bestSeats = evals.filter(e => e.eval.score === topScore).map(e => e.seatIndex);
+
+          // Assert winner(s) recorded in state.winners match the best evaluation seats
+          const winnerSeats = state.winners.map(w => w.seatIndex);
+          const isMatch = bestSeats.every(s => winnerSeats.includes(s));
+          if (!isMatch) {
+            console.error(`  ❌ Showdown Winner Mismatch! Expected seats [${bestSeats.join(',')}], got [${winnerSeats.join(',')}]`);
             settingErrors++;
           }
         }
       }
-    }
+    } // end for hands
 
     if (settingErrors === 0) {
       console.log(`  ✅ ${count}-Players / ${stack}BB: Passed 100% clean (${handsPerSetting} hands).`);

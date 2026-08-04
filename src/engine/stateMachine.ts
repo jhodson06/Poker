@@ -108,8 +108,15 @@ export function createInitialTableState(
   };
 }
 
-export function startNewHand(state: TableState): TableState {
+export function startNewHand(state: TableState, forcedHeroCards?: [Card, Card] | null): TableState {
   let deck = shuffleDeck(createDeck());
+
+  if (forcedHeroCards && forcedHeroCards.length === 2) {
+    const f1 = forcedHeroCards[0];
+    const f2 = forcedHeroCards[1];
+    deck = deck.filter(c => !(c.rank === f1.rank && c.suit === f1.suit));
+    deck = deck.filter(c => !(c.rank === f2.rank && c.suit === f2.suit));
+  }
 
   const newDealer = (state.dealerSeat + 1) % state.playerCount;
   const positions = getPositionNames(state.playerCount);
@@ -148,11 +155,17 @@ export function startNewHand(state: TableState): TableState {
     };
   });
 
+  const heroSeat = state.players.findIndex(p => p.isHuman);
+
   // Deal hole cards (2 per player)
   for (let round = 0; round < 2; round++) {
     for (let i = 0; i < state.playerCount; i++) {
-      const card = deck.pop()!;
-      players[i].holeCards.push(card);
+      if (i === heroSeat && forcedHeroCards && forcedHeroCards.length === 2) {
+        players[i].holeCards.push(forcedHeroCards[round]);
+      } else {
+        const card = deck.pop()!;
+        players[i].holeCards.push(card);
+      }
     }
   }
 
@@ -234,8 +247,9 @@ export function executePlayerAction(
     player.lastAction = player.isAllIn ? 'All-in' : 'Call';
     actualAction = player.isAllIn ? 'allin' : 'call';
   } else if (actionType === 'bet' || actionType === 'raise') {
-    const targetBet = Math.max(raiseAmount, currentHighBet + minRaise);
-    const addedChips = Math.min(player.chips, targetBet - player.currentBet);
+    const rawTarget = Math.max(raiseAmount, currentHighBet + minRaise);
+    const targetBet = Math.round(rawTarget);
+    const addedChips = Math.min(player.chips, Math.max(0, targetBet - player.currentBet));
     
     player.chips -= addedChips;
     player.currentBet += addedChips;
@@ -281,15 +295,14 @@ function advanceTurnOrStreet(state: TableState): TableState {
   
   if (activePlayers.length === 1) {
     const winner = activePlayers[0];
-    winner.chips += state.pot;
+    const players = state.players.map(p => ({ ...p }));
+    const winnerState = players.find(p => p.seatIndex === winner.seatIndex)!;
+    winnerState.chips += state.pot;
 
-    // Deal out all remaining community cards from the deck as phantom cards
-    // so players can see what would have been dealt if the hand continued!
     const remainingDeck = [...state.deck];
     const alreadyDealt = state.communityCards.length;
     const phantomCommunityCards = [...state.communityCards];
 
-    // Deal enough cards to complete the full 5-card board
     if (alreadyDealt < 5) {
       const needed = 5 - alreadyDealt;
       for (let n = 0; n < needed && remainingDeck.length > 0; n++) {
@@ -299,9 +312,15 @@ function advanceTurnOrStreet(state: TableState): TableState {
 
     return {
       ...state,
+      pot: 0,
+      players,
       street: 'showdown',
       phantomCommunityCards,
-      winners: [{ seatIndex: winner.seatIndex, name: winner.isHuman ? 'You' : winner.position, amount: state.pot }]
+      winners: [{
+        seatIndex: winnerState.seatIndex,
+        name: winnerState.isHuman ? 'You' : winnerState.position,
+        amount: state.pot
+      }]
     };
   }
 
@@ -397,40 +416,115 @@ function advanceStreet(state: TableState): TableState {
   };
 }
 
+interface SidePotTier {
+  capAmount: number;
+  potChips: number;
+  eligibleSeatIndices: number[];
+}
+
+function calculateSidePots(players: PlayerState[]): SidePotTier[] {
+  const investedLevels = Array.from(
+    new Set(players.map(p => p.totalInvested).filter(amt => amt > 0))
+  ).sort((a, b) => a - b);
+
+  const sidePots: SidePotTier[] = [];
+  let prevCap = 0;
+
+  for (const cap of investedLevels) {
+    const tierContribution = cap - prevCap;
+    let tierChips = 0;
+    const eligibleSeatIndices: number[] = [];
+
+    players.forEach(p => {
+      if (p.totalInvested > prevCap) {
+        const contribution = Math.min(p.totalInvested - prevCap, tierContribution);
+        tierChips += contribution;
+        if (!p.isFolded) {
+          eligibleSeatIndices.push(p.seatIndex);
+        }
+      }
+    });
+
+    if (tierChips > 0 && eligibleSeatIndices.length > 0) {
+      sidePots.push({
+        capAmount: cap,
+        potChips: tierChips,
+        eligibleSeatIndices
+      });
+    }
+
+    prevCap = cap;
+  }
+
+  return sidePots;
+}
+
 function evaluateShowdown(state: TableState): TableState {
-  const active = state.players.filter(p => !p.isFolded);
-  const evaluations = active.map(p => {
-    const full7 = [...p.holeCards, ...state.communityCards];
-    const evalResult = evaluate7Cards(full7);
-    return {
-      seatIndex: p.seatIndex,
-      name: p.name,
-      evalResult
-    };
+  const players = state.players.map(p => ({ ...p }));
+  const evalMap = new Map<number, HandEvaluation>();
+
+  players.forEach(p => {
+    if (!p.isFolded && p.holeCards.length === 2) {
+      evalMap.set(p.seatIndex, evaluate7Cards([...p.holeCards, ...state.communityCards]));
+    }
   });
 
-  evaluations.sort((a, b) => a.evalResult.score - b.evalResult.score);
-  const topScore = evaluations[0].evalResult.score;
-  const winners = evaluations.filter(e => e.evalResult.score === topScore);
+  const sidePots = calculateSidePots(state.players);
+  const netPayouts = new Map<number, number>();
+  const winnerEvaluations = new Map<number, HandEvaluation>();
 
-  const rawSplit = Math.floor(state.pot / winners.length);
-  const remainder = state.pot - rawSplit * winners.length;
-  const players = [...state.players];
+  sidePots.forEach(tier => {
+    let bestScore = Infinity;
+    tier.eligibleSeatIndices.forEach(seatIdx => {
+      const ev = evalMap.get(seatIdx);
+      if (ev && ev.score < bestScore) {
+        bestScore = ev.score;
+      }
+    });
 
-  const winnersList = winners.map((w, idx) => {
-    const payout = idx === 0 ? rawSplit + remainder : rawSplit;
-    players[w.seatIndex].chips += payout;
-    const p = players[w.seatIndex];
-    return {
-      seatIndex: w.seatIndex,
+    const tierWinners = tier.eligibleSeatIndices.filter(seatIdx => {
+      const ev = evalMap.get(seatIdx);
+      return ev && ev.score === bestScore;
+    });
+
+    if (tierWinners.length > 0) {
+      const splitAmount = Math.floor(tier.potChips / tierWinners.length);
+      const remainder = tier.potChips - splitAmount * tierWinners.length;
+
+      // Sort tied winners out-of-position relative to dealer seat (odd chip goes to first player OOP)
+      tierWinners.sort((a, b) => {
+        const posA = (a - state.dealerSeat + state.playerCount) % state.playerCount;
+        const posB = (b - state.dealerSeat + state.playerCount) % state.playerCount;
+        return posA - posB;
+      });
+
+      tierWinners.forEach((seatIdx, idx) => {
+        const payout = idx === 0 ? splitAmount + remainder : splitAmount;
+        netPayouts.set(seatIdx, (netPayouts.get(seatIdx) || 0) + payout);
+        if (evalMap.has(seatIdx)) {
+          winnerEvaluations.set(seatIdx, evalMap.get(seatIdx)!);
+        }
+      });
+    }
+  });
+
+  const winnersList: { seatIndex: number; name: string; amount: number; evaluation?: HandEvaluation }[] = [];
+
+  netPayouts.forEach((amount, seatIdx) => {
+    players[seatIdx].chips += amount;
+    const p = players[seatIdx];
+
+    winnersList.push({
+      seatIndex: seatIdx,
       name: p.isHuman ? 'You' : p.position,
-      amount: payout,
-      evaluation: w.evalResult
-    };
+      amount: amount / state.bigBlind,
+      evaluation: winnerEvaluations.get(seatIdx)
+    });
   });
 
   return {
     ...state,
+    pot: 0,
     players,
     street: 'showdown',
     winners: winnersList

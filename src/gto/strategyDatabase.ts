@@ -35,70 +35,70 @@ function getPreflopRfiFrequency(highVal: number, lowVal: number, isPair: boolean
   if (position === 'BB') return 0.0; // BB checks when unopened
 
   if (isPair) {
-    if (position === 'UTG') return highVal >= 6 ? 1.0 : (highVal >= 4 ? 0.5 : 0.0);
-    if (position === 'MP') return highVal >= 4 ? 1.0 : 0.5;
+    if (position === 'UTG') return highVal >= 4 ? 1.0 : (highVal >= 2 ? 0.5 : 0.0); // 66+ 100%, 44-55 50%
+    if (position === 'MP') return highVal >= 2 ? 1.0 : 0.5; // 44+ 100%, 22-33 50%
     return 1.0; // CO, BTN, SB open all pairs 22+
   }
 
   if (isSuited) {
     if (highVal === 12) { // Ace-high suited (A2s-AKs)
-      if (position === 'UTG') return lowVal >= 8 || lowVal <= 3 ? 1.0 : 0.0;
-      if (position === 'MP') return lowVal >= 6 || lowVal <= 3 ? 1.0 : 0.5;
-      return 1.0;
+      if (position === 'UTG') return lowVal >= 8 || lowVal <= 3 ? 1.0 : 0.0; // A10s+, A5s-A4s
+      if (position === 'MP') return lowVal >= 6 || lowVal <= 3 ? 1.0 : 0.5; // A8s+, A5s-A2s
+      return 1.0; // CO, BTN, SB open all Axs
     }
-    if (highVal === 11) { // King-high suited
-      if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0;
-      if (position === 'MP') return lowVal >= 7 ? 1.0 : 0.0;
-      if (position === 'CO') return lowVal >= 3 ? 1.0 : 0.0;
-      return 1.0;
+    if (highVal === 11) { // King-high suited (K2s-KQs)
+      if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0; // KJs+
+      if (position === 'MP') return lowVal >= 7 ? 1.0 : 0.0; // K9s+
+      if (position === 'CO') return lowVal >= 3 ? 1.0 : 0.0; // K5s+
+      return 1.0; // BTN, SB open all Kxs
     }
-    if (highVal === 10) { // Queen-high suited
-      if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0;
-      if (position === 'MP') return lowVal >= 8 ? 1.0 : 0.0;
-      if (position === 'CO') return lowVal >= 6 ? 1.0 : 0.0;
-      return lowVal >= 2 ? 1.0 : 0.0;
+    if (highVal === 10) { // Queen-high suited (Q2s-QJs)
+      if (position === 'UTG') return lowVal >= 8 ? 1.0 : 0.0; // Q10s+
+      if (position === 'MP') return lowVal >= 7 ? 1.0 : (lowVal === 6 ? 0.5 : 0.0); // Q9s 100%, Q8s 50%
+      if (position === 'CO') return lowVal >= 4 ? 1.0 : 0.0; // Q6s+
+      return lowVal >= 0 ? 1.0 : 0.0; // BTN, SB open all Qxs
     }
-    if (highVal === 9) { // Jack-high suited
-      if (position === 'UTG') return lowVal === 8 ? 1.0 : 0.0;
-      if (position === 'MP') return lowVal >= 7 ? 1.0 : 0.0;
-      if (position === 'CO') return lowVal >= 6 ? 1.0 : 0.0;
-      return lowVal >= 4 ? 1.0 : 0.0;
+    if (highVal === 9) { // Jack-high suited (J2s-JTs)
+      if (position === 'UTG') return lowVal === 8 ? 1.0 : 0.0; // J10s
+      if (position === 'MP') return lowVal >= 7 ? 1.0 : 0.0; // J9s+
+      if (position === 'CO') return lowVal >= 5 ? 1.0 : 0.0; // J7s+
+      return lowVal >= 2 ? 1.0 : 0.0; // BTN, SB open J4s+
     }
-    if (highVal === 8) { // 10-high suited
-      if (position === 'UTG') return lowVal === 7 ? 0.5 : 0.0;
-      if (position === 'MP') return lowVal >= 7 ? 1.0 : 0.0;
-      if (position === 'CO') return lowVal >= 6 ? 1.0 : 0.0;
-      return lowVal >= 4 ? 1.0 : 0.0;
+    if (highVal === 8) { // 10-high suited (T2s-T9s)
+      if (position === 'UTG') return lowVal === 7 ? 0.5 : 0.0; // T9s mix
+      if (position === 'MP') return lowVal >= 6 ? 1.0 : 0.0; // T8s+
+      if (position === 'CO') return lowVal >= 5 ? 1.0 : 0.0; // T7s+
+      return lowVal >= 4 ? 1.0 : 0.0; // BTN, SB open T6s+
     }
-    if (highVal - lowVal <= 2 && highVal >= 3) {
+    if (highVal - lowVal <= 2 && highVal >= 3) { // Suited connectors & gappers
       if (position === 'UTG') return 0.0;
-      if (position === 'MP') return highVal >= 6 ? 0.6 : 0.0;
+      if (position === 'MP') return highVal >= 5 ? 0.6 : 0.0;
       if (position === 'CO') return 1.0;
       return 1.0;
     }
-    return position === 'BTN' ? (highVal >= 5 ? 1.0 : 0.0) : 0.0;
+    return position === 'BTN' ? (highVal >= 4 ? 1.0 : 0.0) : 0.0;
   }
 
   // Offsuit hands
-  if (highVal === 12) { // Ace-high offsuit
-    if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0;
-    if (position === 'MP') return lowVal >= 8 ? 1.0 : 0.0;
-    if (position === 'CO') return lowVal >= 7 ? 1.0 : 0.0;
-    return lowVal >= 2 ? 1.0 : 0.0;
+  if (highVal === 12) { // Ace-high offsuit (A2o-AKo)
+    if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0; // AJo+
+    if (position === 'MP') return lowVal >= 8 ? 1.0 : 0.0; // A10o+
+    if (position === 'CO') return lowVal >= 7 ? 1.0 : 0.0; // A9o+
+    return lowVal >= 0 ? 1.0 : 0.0; // BTN, SB open A2o+
   }
-  if (highVal === 11) { // King-high offsuit
-    if (position === 'UTG') return lowVal === 10 ? 1.0 : 0.0;
-    if (position === 'MP') return lowVal >= 9 ? 1.0 : 0.0;
-    if (position === 'CO') return lowVal >= 8 ? 1.0 : 0.0;
-    return lowVal >= 6 ? 1.0 : 0.0;
+  if (highVal === 11) { // King-high offsuit (K2o-KQo)
+    if (position === 'UTG') return lowVal === 10 ? 1.0 : 0.0; // KQo
+    if (position === 'MP') return lowVal >= 9 ? 1.0 : 0.0; // KJo+
+    if (position === 'CO') return lowVal >= 8 ? 1.0 : 0.0; // K10o+
+    return lowVal >= 5 ? 1.0 : 0.0; // BTN, SB open K7o+
   }
-  if (highVal === 10) { // Queen-high offsuit
+  if (highVal === 10) { // Queen-high offsuit (Q2o-QJo)
     if (position === 'UTG' || position === 'MP') return 0.0;
-    if (position === 'CO') return lowVal === 9 ? 1.0 : 0.0;
-    return lowVal >= 7 ? 1.0 : 0.0;
+    if (position === 'CO') return lowVal === 9 ? 1.0 : 0.0; // QJo
+    return lowVal >= 7 ? 1.0 : 0.0; // BTN, SB open Q9o+
   }
   if (highVal === 9) { // Jack-high offsuit
-    if (position === 'BTN') return lowVal >= 7 ? 1.0 : 0.0;
+    if (position === 'BTN' || position === 'SB') return lowVal >= 7 ? 1.0 : 0.0; // J9o+
     return 0.0;
   }
 
