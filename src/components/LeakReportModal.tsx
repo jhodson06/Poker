@@ -89,7 +89,7 @@ export const LeakReportModal: React.FC<LeakReportModalProps> = ({ report, onClos
                 </div>
                 <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800 text-center">
                   <div className="text-2xl font-black text-orange-400">
-                    {report.topLeaks.reduce((s, l) => s + l.totalEvLoss, 0).toFixed(1)}
+                    {report.totalEvLoss.toFixed(1)}
                   </div>
                   <div className="text-[10px] text-slate-400 uppercase font-bold mt-0.5">Total EV Lost (BB)</div>
                 </div>

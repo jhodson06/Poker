@@ -50,6 +50,7 @@ export interface LeakReport {
   drillRecommendations: DrillRecommendation[];
   totalDecisions: number;
   decisionsWithErrors: number;
+  totalEvLoss: number;
   hasEnoughData: boolean;
 }
 
@@ -59,17 +60,21 @@ const MIN_DECISIONS_PER_CATEGORY = 3;
 // ─── Report Generator ─────────────────────────────────────────────────────────
 
 export function generateLeakReport(records: LeakRecord[]): LeakReport {
-  const hasEnoughData = records.length >= MIN_DECISIONS_FOR_REPORT;
-  const decisionsWithErrors = records.filter(r => r.evLoss > 0).length;
+  const decisionsWithErrors = records.filter(r => r.grade !== 'Correct').length;
+  const trueTotalEvLoss = records.reduce((s, r) => s + r.evLoss, 0);
 
-  if (!hasEnoughData) {
-    return { topLeaks: [], drillRecommendations: [], totalDecisions: records.length, decisionsWithErrors, hasEnoughData: false };
+  if (records.length < MIN_DECISIONS_FOR_REPORT) {
+    return { topLeaks: [], drillRecommendations: [], totalDecisions: records.length, decisionsWithErrors, totalEvLoss: trueTotalEvLoss, hasEnoughData: false };
+  }
+
+  if (decisionsWithErrors === 0) {
+    return { topLeaks: [], drillRecommendations: [], totalDecisions: records.length, decisionsWithErrors, totalEvLoss: trueTotalEvLoss, hasEnoughData: true };
   }
 
   // Only analyze decisions where the player actually lost EV
   const errorRecords = records.filter(r => r.evLoss > 0);
   if (errorRecords.length < MIN_DECISIONS_PER_CATEGORY) {
-    return { topLeaks: [], drillRecommendations: [], totalDecisions: records.length, decisionsWithErrors: 0, hasEnoughData: true };
+    return { topLeaks: [], drillRecommendations: [], totalDecisions: records.length, decisionsWithErrors, totalEvLoss: trueTotalEvLoss, hasEnoughData: true };
   }
 
   // ── Build category buckets ──────────────────────────────────────────────────
@@ -162,7 +167,9 @@ export function generateLeakReport(records: LeakRecord[]): LeakReport {
     return drill;
   });
 
-  return { topLeaks, drillRecommendations, totalDecisions: records.length, decisionsWithErrors, hasEnoughData };
+  const trueTotalEvLoss = records.reduce((s, r) => s + r.evLoss, 0);
+
+  return { topLeaks, drillRecommendations, totalDecisions: records.length, decisionsWithErrors, totalEvLoss: trueTotalEvLoss, hasEnoughData };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
