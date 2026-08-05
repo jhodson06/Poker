@@ -25,6 +25,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { SandboxModal } from './components/SandboxModal';
 import { LeakReportModal } from './components/LeakReportModal';
 import { generateLeakReport, DrillRecommendation } from './pedagogy/leakDetector';
+import { MainMenu } from './components/MainMenu';
 import { detectBoardTexture } from './engine/betAbstraction';
 import { Download } from 'lucide-react';
 
@@ -162,7 +163,8 @@ export const App: React.FC = () => {
   const [activeStrategy, setActiveStrategy] = useState<GtoNodeStrategy | null>(null);
 
   const [isSolutionBrowserOpen, setIsSolutionBrowserOpen] = useState<boolean>(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [appMode, setAppMode] = useState<'menu' | 'full_game'>('menu');
   const [isSandboxOpen, setIsSandboxOpen] = useState<boolean>(false);
   const [isLeakReportOpen, setIsLeakReportOpen] = useState<boolean>(false);
 
@@ -522,6 +524,10 @@ export const App: React.FC = () => {
       return next;
     });
   };
+
+  if (appMode === 'menu') {
+    return <MainMenu onStartFullGame={() => setAppMode('full_game')} />;
+  }
 
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col justify-between overflow-hidden selection:bg-emerald-500 selection:text-slate-950">

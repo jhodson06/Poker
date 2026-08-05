@@ -140,3 +140,8 @@ npm run build
 ### C. Pending Desktop App Enhancements (`pending_app_changes.md`)
 * I have created a `pending_app_changes.md` file in the root directory. 
 * **FUTURE AIs:** Please refer to `pending_app_changes.md` for a comprehensive list of mechanics that were stripped down for the Web prototype (such as Node `fs` dependencies and high-iteration CFR blocking limits) that must be restored when this app is ported to Steam/Electron! Any future down-scaling for the web version should be tracked there.
+
+### D. Main Menu Splash Screen
+* Created a new `MainMenu.tsx` component that acts as the entry point for the application.
+* `App.tsx` now manages an `appMode` state (`'menu' | 'full_game'`) which toggles between the splash screen and the poker table.
+* The "Full game" button immediately launches into the Sandbox table, intentionally bypassing the `SettingsModal` by defaulting `isSettingsOpen` to `false`.
