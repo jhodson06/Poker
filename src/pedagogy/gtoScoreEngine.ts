@@ -1,4 +1,6 @@
 import { DecisionGrading } from './evCalculator';
+import { LeakRecord } from './leakDetector';
+import { BettingStreet, PlayerPosition } from '../engine/stateMachine';
 
 export interface SessionStats {
   handsPlayed: number;
@@ -10,9 +12,10 @@ export interface SessionStats {
   totalEvLossBB: number;
   currentStreak: number;
   bestStreak: number;
-  gtoScorePercent: number; // 0% to 100%
+  gtoScorePercent: number;
   recentGradings: DecisionGrading[];
-  lowFreqCount: number; // Count of moves taken with 5% <= freq < 25%
+  lowFreqCount: number;
+  leakRecords: LeakRecord[];
 }
 
 export function createInitialSessionStats(): SessionStats {
@@ -28,7 +31,8 @@ export function createInitialSessionStats(): SessionStats {
     bestStreak: 0,
     gtoScorePercent: 100,
     recentGradings: [],
-    lowFreqCount: 0
+    lowFreqCount: 0,
+    leakRecords: [],
   };
 }
 
@@ -39,7 +43,15 @@ export function recordHandCompleted(stats: SessionStats): SessionStats {
   };
 }
 
-export function recordDecision(stats: SessionStats, grading: DecisionGrading): SessionStats {
+export function recordDecision(
+  stats: SessionStats,
+  grading: DecisionGrading,
+  leakContext?: {
+    street: BettingStreet;
+    position: PlayerPosition;
+    boardTexture: 'dry' | 'wet' | 'very_wet' | 'preflop';
+  }
+): SessionStats {
   const totalDecisions = stats.totalDecisions + 1;
   const totalEvLossBB = Number((stats.totalEvLossBB + grading.evLoss).toFixed(2));
 
@@ -71,6 +83,21 @@ export function recordDecision(stats: SessionStats, grading: DecisionGrading): S
 
   const recentGradings = [grading, ...stats.recentGradings].slice(0, 10);
 
+  // Build leak record if context was provided
+  const newLeakRecord: LeakRecord | null = leakContext ? {
+    street:       leakContext.street,
+    position:     leakContext.position,
+    boardTexture: leakContext.boardTexture,
+    actionTaken:  grading.userMatchedAction,
+    grade:        grading.grade,
+    evLoss:       grading.evLoss,
+    handNumber:   stats.handsPlayed,
+  } : null;
+
+  const leakRecords = newLeakRecord
+    ? [...stats.leakRecords, newLeakRecord]
+    : stats.leakRecords;
+
   return {
     ...stats,
     totalDecisions,
@@ -83,6 +110,7 @@ export function recordDecision(stats: SessionStats, grading: DecisionGrading): S
     bestStreak,
     gtoScorePercent,
     recentGradings,
-    lowFreqCount
+    lowFreqCount,
+    leakRecords,
   };
 }

@@ -14,6 +14,8 @@ import { evaluateUserDecision, DecisionGrading } from './pedagogy/evCalculator';
 import { SessionStats, createInitialSessionStats, recordDecision, recordHandCompleted } from './pedagogy/gtoScoreEngine';
 
 import { parseCard, Card } from './engine/card';
+import { evaluate7Cards } from './engine/evaluator';
+import { calculateTableEquities } from './engine/equityCalculator';
 import { LiveHudDashboard } from './components/LiveHudDashboard';
 import { PokerTableCanvas } from './components/PokerTableCanvas';
 import { ActionControls } from './components/ActionControls';
@@ -21,6 +23,9 @@ import { FeedbackOverlay } from './components/FeedbackOverlay';
 import { SolutionBrowser } from './components/SolutionBrowser';
 import { SettingsModal } from './components/SettingsModal';
 import { SandboxModal } from './components/SandboxModal';
+import { LeakReportModal } from './components/LeakReportModal';
+import { generateLeakReport, DrillRecommendation } from './pedagogy/leakDetector';
+import { detectBoardTexture } from './engine/betAbstraction';
 import { Download } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +45,7 @@ interface ActionLogEntry {
   communityCards: string;
   phantomCommunityCards: string;
   playerStates: string;
+  loggedEquity?: string;
   gtoStrategy?: string;
   gtoGrading?: string;
 }
@@ -50,11 +56,16 @@ interface HandRecord {
   playerCount: number;
   bigBlind: number;
   difficultyMode: string;
+  cheatGodMode: boolean;
+  cheatEquityOverlays: boolean;
+  cheatForcedCards: string;
+  isStrictStrategy: boolean;
   players: string;
   actions: ActionLogEntry[];
   result: string;
   finalCommunityCards: string;
   phantomCommunityCards: string;
+  finalShowdownEquities?: string;
   potAtShowdown: number;
 }
 
@@ -71,6 +82,11 @@ function formatHandRecord(hand: HandRecord): string {
     `================================================================================`,
     `HAND #${hand.handNumber}  |  Started: ${hand.startedAt}`,
     `Mode: ${hand.difficultyMode.toUpperCase()}  |  Players: ${hand.playerCount}  |  Big Blind: ${hand.bigBlind} BB`,
+    `PRACTICE & CHEAT SETTINGS:`,
+    `  - God Mode (Reveal Cards): ${hand.cheatGodMode ? 'ACTIVE (ON)' : 'OFF'}`,
+    `  - Live Equity Overlays:    ${hand.cheatEquityOverlays ? 'ACTIVE (ON)' : 'OFF'}`,
+    `  - Forced Hero Cards:       ${hand.cheatForcedCards}`,
+    `  - Strict Strategy Mode:    ${hand.isStrictStrategy ? 'ACTIVE (Within 10% of Best)' : 'OFF (Standard Mix)'}`,
     `--------------------------------------------------------------------------------`,
     `PLAYER STARTING SEATS & HOLE CARDS:`,
     `${hand.players}`,
@@ -89,6 +105,9 @@ function formatHandRecord(hand: HandRecord): string {
       if (a.phantomCommunityCards !== '(none)') {
         lines.push(`       Phantom:  ${a.phantomCommunityCards}`);
       }
+      if (a.loggedEquity) {
+        lines.push(`       Equity:   ${a.loggedEquity}`);
+      }
       lines.push(`       Players:  ${a.playerStates}`);
       if (a.gtoStrategy) lines.push(`       GTO Node: ${a.gtoStrategy}`);
       if (a.gtoGrading) lines.push(`       GTO Grade: ${a.gtoGrading}`);
@@ -102,6 +121,9 @@ function formatHandRecord(hand: HandRecord): string {
   lines.push(`Dealt Community Cards:   ${hand.finalCommunityCards}`);
   if (hand.phantomCommunityCards !== '(none)') {
     lines.push(`Phantom Board (undealt): ${hand.phantomCommunityCards}`);
+  }
+  if (hand.finalShowdownEquities) {
+    lines.push(`Showdown Final Equities: ${hand.finalShowdownEquities}`);
   }
   lines.push(`Pot at Showdown:        ${hand.potAtShowdown} BB`);
   lines.push(`================================================================================\n`);
@@ -142,6 +164,7 @@ export const App: React.FC = () => {
   const [isSolutionBrowserOpen, setIsSolutionBrowserOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(true);
   const [isSandboxOpen, setIsSandboxOpen] = useState<boolean>(false);
+  const [isLeakReportOpen, setIsLeakReportOpen] = useState<boolean>(false);
 
   // Practice Mode Cheat Tools
   const [revealAllCards, setRevealAllCards] = useState<boolean>(false);
@@ -196,8 +219,12 @@ export const App: React.FC = () => {
       playerCount: state.playerCount,
       bigBlind: state.bigBlind,
       difficultyMode,
+      cheatGodMode: revealAllCards,
+      cheatEquityOverlays: showEquityOverlays,
+      cheatForcedCards: forcedHeroCards ? forcedHeroCards.join(' ') : 'None',
+      isStrictStrategy,
       players: state.players.map(p =>
-        `\n  - ${p.isHuman ? 'Hero (You)' : p.name} (${p.position})${p.isHuman ? ' [HERO]' : ''}: ${p.chips} BB | Hole: ${serializeCards(p.holeCards)}`
+        `\n  - ${p.isHuman ? 'Hero (You)' : p.name} (${p.position})${p.isHuman ? ' [HERO]' : ''}: ${(p.chips / state.bigBlind).toFixed(1).replace('.0', '')} BB | Hole: ${serializeCards(p.holeCards)}`
       ).join(''),
       actions: [],
       result: 'In Progress',
@@ -205,7 +232,7 @@ export const App: React.FC = () => {
       phantomCommunityCards: '(none)',
       potAtShowdown: 0,
     };
-  }, [difficultyMode]);
+  }, [difficultyMode, revealAllCards, showEquityOverlays, forcedHeroCards, isStrictStrategy]);
 
   const appendActionLog = useCallback((
     state: TableState,
@@ -233,6 +260,23 @@ export const App: React.FC = () => {
     }
 
     const hero = state.players.find(p => p.isHuman);
+
+    // Compute Logged Seat Equities for Action History Log using normalized calculateTableEquities
+    let loggedEquity = '';
+    const activePlayers = state.players.filter(p => !p.isFolded && p.holeCards.length === 2);
+    if (activePlayers.length > 0) {
+      const eqMap = calculateTableEquities(state);
+      if (revealAllCards) {
+        loggedEquity = activePlayers.map(p => {
+          const eqVal = eqMap.get(p.seatIndex) || 0;
+          return `${p.isHuman ? 'Hero' : p.position}: ${eqVal}% EQ`;
+        }).join(' | ');
+      } else if (hero && !hero.isFolded && hero.holeCards.length === 2) {
+        const eqVal = eqMap.get(hero.seatIndex) || 0;
+        loggedEquity = `Hero: ${eqVal}% EQ`;
+      }
+    }
+
     const entry: ActionLogEntry = {
       timestamp: new Date().toISOString(),
       street: state.street,
@@ -247,13 +291,14 @@ export const App: React.FC = () => {
       communityCards: serializeCards(state.communityCards),
       phantomCommunityCards: serializeCards(state.phantomCommunityCards || []),
       playerStates: state.players.map(p =>
-        `${p.name}:${p.chips}BB${p.isFolded ? '(F)' : p.isAllIn ? '(AI)' : ''}`
+        `${p.name}:${(p.chips / state.bigBlind).toFixed(1).replace('.0', '')}BB${p.isFolded ? '(F)' : p.isAllIn ? '(AI)' : ''}`
       ).join(' '),
+      loggedEquity,
       gtoStrategy: gtoStrategy ? `[${gtoStrategy.nodeId}] Optimal: ${gtoStrategy.optimalAction.label} (${(gtoStrategy.optimalAction.frequency * 100).toFixed(0)}% freq, EV:${gtoStrategy.optimalAction.ev.toFixed(1)} BB) | Freqs: ${gtoStrategy.frequencies.map(f => `${f.label}=${(f.frequency * 100).toFixed(0)}%`).join(', ')}` : undefined,
       gtoGrading: gtoGrading ? `[${gtoGrading.grade}] ${gtoGrading.userActionLabel} | EV loss: ${gtoGrading.evLoss.toFixed(2)} BB | ${gtoGrading.explanation}` : undefined,
     };
     currentHandRef.current.actions.push(entry);
-  }, []);
+  }, [revealAllCards]);
 
   const getCurrentHandRecord = useCallback((state: TableState): HandRecord => {
     if (!currentHandRef.current) {
@@ -278,6 +323,15 @@ export const App: React.FC = () => {
       const undealtOnly = phantomAll.slice(dealtCount);
       hand.phantomCommunityCards = serializeCards(undealtOnly);
       hand.potAtShowdown = state.pot;
+
+      const finalEqMap = calculateTableEquities(state);
+      const activeAtShowdown = state.players.filter(p => !p.isFolded && p.holeCards.length === 2);
+      if (activeAtShowdown.length > 0) {
+        hand.finalShowdownEquities = activeAtShowdown.map(p => {
+          const eqVal = finalEqMap.get(p.seatIndex) || 0;
+          return `${p.isHuman ? 'Hero (You)' : p.position}: ${eqVal}% EQ`;
+        }).join(' | ');
+      }
     }
     return hand;
   }, [initCurrentHand]);
@@ -344,7 +398,7 @@ export const App: React.FC = () => {
 
     if (isAiTurn) {
       aiTimerRef.current = setTimeout(() => {
-        const aiDecision = sampleOpponentAiAction(tableState);
+        const aiDecision = sampleOpponentAiAction(tableState, difficultyMode, isStrictStrategy);
         const next = executePlayerAction(tableState, aiDecision.seatIndex, aiDecision.action, aiDecision.amount);
         appendActionLog(
           tableState,
@@ -380,31 +434,50 @@ export const App: React.FC = () => {
       tableState.currentHighBet,
       tableState.pot,
       tableState.bigBlind,
-      tableState.communityCards
+      tableState.communityCards,
+      tableState.raiseCount
     );
 
-    // 2. Evaluate Decision EV Loss & Grade (with strict mode check & frequency leak tracking!)
-    const grading = evaluateUserDecision(actionType, amount, strategyNode, sessionStats, tableState.pot, difficultyMode, isStrictStrategy);
+    // 2. Compute hero equity for accurate All-In Call EV formula (postflop only)
+    let heroEquity: number | undefined;
+    if (tableState.street !== 'preflop' && actionType === 'call' && tableState.communityCards.length >= 3) {
+      const eqMap = calculateTableEquities(tableState);
+      const heroEqVal = eqMap.get(heroSeat);
+      heroEquity = heroEqVal !== undefined ? heroEqVal / 100 : undefined;
+    }
 
-    // 3. Update Session Analytics Stats
-    setSessionStats(prev => recordDecision(prev, grading));
+    const grading = evaluateUserDecision(actionType, amount, strategyNode, sessionStats, tableState.pot, difficultyMode, isStrictStrategy, tableState.bigBlind, tableState.currentHighBet, heroEquity);
 
-    // 4. Update rating toast permanently
+    const leakContext = {
+      street: tableState.street,
+      position: hero.position,
+      boardTexture: tableState.street === 'preflop' ? 'preflop' as const : detectBoardTexture(tableState.communityCards),
+    };
+    setSessionStats(prev => recordDecision(prev, grading, leakContext));
+
+    const nextState = executePlayerAction(
+      tableState,
+      heroSeat,
+      actionType,
+      amount
+    );
+
     setActiveGrading(grading);
     setActiveStrategy(strategyNode);
-
-    // 5. Advance Table State & Record Log Entry
-    const next = executePlayerAction(tableState, heroSeat, actionType, amount);
+    
+    hero.chips = nextState.players[heroSeat].chips; 
+    
     appendActionLog(
       tableState,
-      { name: hero.name, position: hero.position, isHuman: true },
+      { name: 'Hero', position: hero.position, isHuman: true },
       actionType,
       amount,
-      next.pot,
+      nextState.pot,
       strategyNode,
       grading
     );
-    setTableState(next);
+
+    setTableState(nextState);
   };
 
   const handleNextHand = () => {
@@ -461,6 +534,7 @@ export const App: React.FC = () => {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenSolutionBrowser={() => setIsSolutionBrowserOpen(true)}
           onOpenSandbox={() => setIsSandboxOpen(true)}
+          onOpenLeakReport={() => setIsLeakReportOpen(true)}
           onResetSession={handleResetSession}
         />
       </div>
@@ -512,6 +586,9 @@ export const App: React.FC = () => {
         <FeedbackOverlay
           grading={activeGrading}
           strategy={activeStrategy}
+          difficultyMode={difficultyMode}
+          heroStack={tableState.players.find(p => p.isHuman)?.chips}
+          potAfterBet={tableState.pot}
           onDismiss={() => setActiveGrading(null)}
         />
       )}
@@ -526,6 +603,23 @@ export const App: React.FC = () => {
           onToggleEquityOverlays={setShowEquityOverlays}
           onSetForcedHeroCards={setForcedHeroCards}
           onClose={() => setIsSandboxOpen(false)}
+        />
+      )}
+
+      {/* Leak Detection Report Modal */}
+      {isLeakReportOpen && (
+        <LeakReportModal
+          report={generateLeakReport(sessionStats.leakRecords)}
+          onClose={() => setIsLeakReportOpen(false)}
+          onApplyDrill={(drill: DrillRecommendation) => {
+            // Apply drill settings to Sandbox
+            if (drill.suggestedPosition) {
+              // TODO: A more robust way to set position would be needed here, 
+              // but for now Sandbox doesn't natively force hero position (it forces cards).
+              // Setting cards could happen here.
+            }
+            setIsSandboxOpen(true);
+          }}
         />
       )}
 

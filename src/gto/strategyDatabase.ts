@@ -1,12 +1,21 @@
-import { Card, RANKS, createCard } from '../engine/card';
+﻿import { Card, RANKS, createCard } from '../engine/card';
 import { PlayerPosition, BettingStreet } from '../engine/stateMachine';
 import { evaluate7Cards } from '../engine/evaluator';
+import { detectBoardTexture } from '../engine/betAbstraction';
+
+// 8-bucket abstraction space per research AI spec:
+// 33% | 50% | 67% | 75% | 100% | 150% | overbet(133%) | allin
+export type BetAction =
+  | 'fold' | 'check' | 'call' | 'raise' | 'allin'
+  | 'bet_33' | 'bet_50' | 'bet_67' | 'bet_75'
+  | 'bet_100' | 'bet_150' | 'bet_overbet';
 
 export interface ActionFrequency {
-  action: 'fold' | 'check' | 'call' | 'bet_33' | 'bet_75' | 'raise' | 'allin';
+  action: BetAction;
   label: string;
-  frequency: number; // 0.0 to 1.0 (sums to 1.0)
-  ev: number; // Expected Value in Big Blinds
+  frequency: number;   // 0.0-1.0
+  ev: number;
+  potFraction?: number; // for PHM blending
 }
 
 export interface GtoNodeStrategy {
@@ -16,227 +25,271 @@ export interface GtoNodeStrategy {
   street: BettingStreet;
   frequencies: ActionFrequency[];
   optimalAction: ActionFrequency;
+  boardTexture?: 'dry' | 'wet' | 'very_wet';
 }
 
 export function getCanonicalHandKey(c1: Card, c2: Card): string {
-  const r1 = c1.value;
-  const r2 = c2.value;
+  const r1 = c1.value, r2 = c2.value;
   const highRank = RANKS[Math.max(r1, r2)];
-  const lowRank = RANKS[Math.min(r1, r2)];
-
-  if (r1 === r2) {
-    return `${highRank}${lowRank}`;
-  }
-  const isSuited = c1.suit === c2.suit;
-  return `${highRank}${lowRank}${isSuited ? 's' : 'o'}`;
+  const lowRank  = RANKS[Math.min(r1, r2)];
+  if (r1 === r2) return `${highRank}${lowRank}`;
+  return `${highRank}${lowRank}${c1.suit === c2.suit ? 's' : 'o'}`;
 }
 
+function isInPosition(p: PlayerPosition)   { return p === 'BTN' || p === 'CO'; }
+function isLatePosition(p: PlayerPosition) { return p === 'BTN' || p === 'CO' || p === 'SB'; }
+
 function getPreflopRfiFrequency(highVal: number, lowVal: number, isPair: boolean, isSuited: boolean, position: PlayerPosition): number {
-  if (position === 'BB') return 0.0; // BB checks when unopened
-
+  if (position === 'BB') return 0.0;
   if (isPair) {
-    if (position === 'UTG') return highVal >= 4 ? 1.0 : (highVal >= 2 ? 0.5 : 0.0); // 66+ 100%, 44-55 50%
-    if (position === 'MP') return highVal >= 2 ? 1.0 : 0.5; // 44+ 100%, 22-33 50%
-    return 1.0; // CO, BTN, SB open all pairs 22+
+    if (position === 'UTG') return highVal >= 4 ? 1.0 : (highVal >= 2 ? 0.5 : 0.0);
+    if (position === 'MP')  return highVal >= 2 ? 1.0 : 0.5;
+    return 1.0;
   }
-
   if (isSuited) {
-    if (highVal === 12) { // Ace-high suited (A2s-AKs)
-      if (position === 'UTG') return lowVal >= 8 || lowVal <= 3 ? 1.0 : 0.0; // A10s+, A5s-A4s
-      if (position === 'MP') return lowVal >= 6 || lowVal <= 3 ? 1.0 : 0.5; // A8s+, A5s-A2s
-      return 1.0; // CO, BTN, SB open all Axs
+    if (highVal === 12) {
+      if (position === 'UTG') return lowVal >= 8 || lowVal <= 3 ? 1.0 : 0.0;
+      if (position === 'MP')  return lowVal >= 6 || lowVal <= 3 ? 1.0 : 0.5;
+      return 1.0;
     }
-    if (highVal === 11) { // King-high suited (K2s-KQs)
-      if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0; // KJs+
-      if (position === 'MP') return lowVal >= 7 ? 1.0 : 0.0; // K9s+
-      if (position === 'CO') return lowVal >= 3 ? 1.0 : 0.0; // K5s+
-      return 1.0; // BTN, SB open all Kxs
+    if (highVal === 11) {
+      if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0;
+      if (position === 'MP')  return lowVal >= 7 ? 1.0 : 0.0;
+      if (position === 'CO')  return lowVal >= 3 ? 1.0 : 0.0;
+      return 1.0;
     }
-    if (highVal === 10) { // Queen-high suited (Q2s-QJs)
-      if (position === 'UTG') return lowVal >= 8 ? 1.0 : 0.0; // Q10s+
-      if (position === 'MP') return lowVal >= 7 ? 1.0 : (lowVal === 6 ? 0.5 : 0.0); // Q9s 100%, Q8s 50%
-      if (position === 'CO') return lowVal >= 4 ? 1.0 : 0.0; // Q6s+
-      return lowVal >= 0 ? 1.0 : 0.0; // BTN, SB open all Qxs
+    if (highVal === 10) {
+      if (position === 'UTG') return lowVal >= 8 ? 1.0 : 0.0;
+      if (position === 'MP')  return lowVal >= 7 ? 1.0 : (lowVal === 6 ? 0.5 : 0.0);
+      if (position === 'CO')  return lowVal >= 4 ? 1.0 : 0.0;
+      return 1.0;
     }
-    if (highVal === 9) { // Jack-high suited (J2s-JTs)
-      if (position === 'UTG') return lowVal === 8 ? 1.0 : 0.0; // J10s
-      if (position === 'MP') return lowVal >= 7 ? 1.0 : 0.0; // J9s+
-      if (position === 'CO') return lowVal >= 5 ? 1.0 : 0.0; // J7s+
-      return lowVal >= 2 ? 1.0 : 0.0; // BTN, SB open J4s+
+    if (highVal === 9) {
+      if (position === 'UTG') return lowVal === 8 ? 1.0 : 0.0;
+      if (position === 'MP')  return lowVal >= 7 ? 1.0 : 0.0;
+      if (position === 'CO')  return lowVal >= 5 ? 1.0 : 0.0;
+      return lowVal >= 2 ? 1.0 : 0.0;
     }
-    if (highVal === 8) { // 10-high suited (T2s-T9s)
-      if (position === 'UTG') return lowVal === 7 ? 0.5 : 0.0; // T9s mix
-      if (position === 'MP') return lowVal >= 6 ? 1.0 : 0.0; // T8s+
-      if (position === 'CO') return lowVal >= 5 ? 1.0 : 0.0; // T7s+
-      return lowVal >= 4 ? 1.0 : 0.0; // BTN, SB open T6s+
+    if (highVal === 8) {
+      if (position === 'UTG') return lowVal === 7 ? 0.5 : 0.0;
+      if (position === 'MP')  return lowVal >= 6 ? 1.0 : 0.0;
+      if (position === 'CO')  return lowVal >= 5 ? 1.0 : 0.0;
+      return lowVal >= 4 ? 1.0 : 0.0;
     }
-    if (highVal - lowVal <= 2 && highVal >= 3) { // Suited connectors & gappers
+    if (highVal - lowVal <= 2 && highVal >= 3) {
       if (position === 'UTG') return 0.0;
-      if (position === 'MP') return highVal >= 5 ? 0.6 : 0.0;
-      if (position === 'CO') return 1.0;
+      if (position === 'MP')  return highVal >= 5 ? 0.6 : 0.0;
       return 1.0;
     }
     return position === 'BTN' ? (highVal >= 4 ? 1.0 : 0.0) : 0.0;
   }
-
-  // Offsuit hands
-  if (highVal === 12) { // Ace-high offsuit (A2o-AKo)
-    if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0; // AJo+
-    if (position === 'MP') return lowVal >= 8 ? 1.0 : 0.0; // A10o+
-    if (position === 'CO') return lowVal >= 7 ? 1.0 : 0.0; // A9o+
-    return lowVal >= 0 ? 1.0 : 0.0; // BTN, SB open A2o+
+  if (highVal === 12) {
+    if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0;
+    if (position === 'MP')  return lowVal >= 8 ? 1.0 : 0.0;
+    if (position === 'CO')  return lowVal >= 7 ? 1.0 : 0.0;
+    return 1.0;
   }
-  if (highVal === 11) { // King-high offsuit (K2o-KQo)
-    if (position === 'UTG') return lowVal === 10 ? 1.0 : 0.0; // KQo
-    if (position === 'MP') return lowVal >= 9 ? 1.0 : 0.0; // KJo+
-    if (position === 'CO') return lowVal >= 8 ? 1.0 : 0.0; // K10o+
-    return lowVal >= 5 ? 1.0 : 0.0; // BTN, SB open K7o+
+  if (highVal === 11) {
+    if (position === 'UTG') return lowVal === 10 ? 1.0 : 0.0;
+    if (position === 'MP')  return lowVal >= 9 ? 1.0 : 0.0;
+    if (position === 'CO')  return lowVal >= 8 ? 1.0 : 0.0;
+    return lowVal >= 5 ? 1.0 : 0.0;
   }
-  if (highVal === 10) { // Queen-high offsuit (Q2o-QJo)
+  if (highVal === 10) {
     if (position === 'UTG' || position === 'MP') return 0.0;
-    if (position === 'CO') return lowVal === 9 ? 1.0 : 0.0; // QJo
-    return lowVal >= 7 ? 1.0 : 0.0; // BTN, SB open Q9o+
+    if (position === 'CO')  return lowVal === 9 ? 1.0 : 0.0;
+    return lowVal >= 7 ? 1.0 : 0.0;
   }
-  if (highVal === 9) { // Jack-high offsuit
-    if (position === 'BTN' || position === 'SB') return lowVal >= 7 ? 1.0 : 0.0; // J9o+
+  if (highVal === 9) {
+    if (position === 'BTN' || position === 'SB') return lowVal >= 7 ? 1.0 : 0.0;
     return 0.0;
   }
-
   return 0.0;
 }
 
 export function getGtoStrategyForState(
-  c1: Card,
-  c2: Card,
+  c1: Card, c2: Card,
   position: PlayerPosition,
   street: BettingStreet,
   currentHighBet: number,
   potSize: number,
   bigBlind: number,
-  communityCards: Card[] = []
+  communityCards: Card[] = [],
+  raiseCount: number = 0
 ): GtoNodeStrategy {
-  const handKey = getCanonicalHandKey(c1, c2);
-  const r1 = c1.value;
-  const r2 = c2.value;
-  const isPair = r1 === r2;
-  const highVal = Math.max(r1, r2);
-  const lowVal = Math.min(r1, r2);
+  const handKey  = getCanonicalHandKey(c1, c2);
+  const r1 = c1.value, r2 = c2.value;
+  const isPair   = r1 === r2;
+  const highVal  = Math.max(r1, r2);
+  const lowVal   = Math.min(r1, r2);
   const isSuited = c1.suit === c2.suit;
+  const ip = isInPosition(position);
+  const lp = isLatePosition(position);
 
   let freqs: ActionFrequency[] = [];
+  let boardTexture: 'dry' | 'wet' | 'very_wet' | undefined;
 
   if (street === 'preflop') {
     const isFacingRaise = currentHighBet > bigBlind;
+    const is4BetSpot    = raiseCount >= 2;
 
     if (!isFacingRaise) {
-      // Position-based RFI (Raise First In) range
-      const rFreq = getPreflopRfiFrequency(highVal, lowVal, isPair, isSuited, position);
+      const rFreq     = getPreflopRfiFrequency(highVal, lowVal, isPair, isSuited, position);
+      const baseEv    = (lp ? 2.5 : 2.0) + highVal * 0.3;
+      const openLabel = lp ? 'Raise 3x BB' : 'Raise 2.5x BB';
       if (rFreq === 0) {
-        freqs = [
-          { action: 'fold', label: 'Fold', frequency: 1.0, ev: 0 },
-          { action: 'raise', label: 'Raise 2.5x', frequency: 0.0, ev: -0.2 }
-        ];
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 1.0, ev: 0 }, { action: 'raise', label: openLabel, frequency: 0.0, ev: -0.2 }];
       } else if (rFreq === 1.0) {
-        freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 },
-          { action: 'raise', label: 'Raise 2.5x', frequency: 1.0, ev: 2.0 + highVal * 0.3 }
-        ];
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 }, { action: 'raise', label: openLabel, frequency: 1.0, ev: baseEv }];
       } else {
-        freqs = [
-          { action: 'fold', label: 'Fold', frequency: Number((1 - rFreq).toFixed(2)), ev: 0 },
-          { action: 'raise', label: 'Raise 2.5x', frequency: rFreq, ev: 1.0 + highVal * 0.1 }
-        ];
+        freqs = [{ action: 'fold', label: 'Fold', frequency: Number((1 - rFreq).toFixed(2)), ev: 0 }, { action: 'raise', label: openLabel, frequency: rFreq, ev: 1.0 + highVal * 0.1 }];
+      }
+    } else if (is4BetSpot) {
+      if (highVal >= 11 && (isPair || isSuited)) {
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 }, { action: 'call', label: 'Call', frequency: ip ? 0.30 : 0.20, ev: 5.5 }, { action: 'raise', label: ip ? '4-Bet 2.3x' : '4-Bet 2.8x', frequency: ip ? 0.70 : 0.80, ev: 9.0 }];
+      } else if (isPair && highVal >= 6) {
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.50, ev: 0 }, { action: 'call', label: 'Call', frequency: ip ? 0.35 : 0.30, ev: 2.5 }, { action: 'raise', label: ip ? '4-Bet 2.3x' : '4-Bet 2.8x', frequency: ip ? 0.15 : 0.20, ev: 1.8 }];
+      } else {
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.88, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.12, ev: -0.5 }];
       }
     } else {
-      // Facing a Raise / 3-Bet spot preflop
+      const label3 = ip ? '3-Bet 3x' : '3-Bet 4x';
       if (highVal >= 11 && (isPair || isSuited)) {
-        freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 },
-          { action: 'call', label: 'Call', frequency: 0.35, ev: 4.2 },
-          { action: 'raise', label: '3-Bet', frequency: 0.65, ev: 6.8 }
-        ];
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.35, ev: 4.2 }, { action: 'raise', label: label3, frequency: 0.65, ev: 6.8 }];
       } else if (isPair || highVal >= 10) {
-        freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.65, ev: 0 },
-          { action: 'call', label: 'Call', frequency: 0.30, ev: 1.2 },
-          { action: 'raise', label: '3-Bet', frequency: 0.05, ev: 0.5 }
-        ];
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.65, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.30, ev: 1.2 }, { action: 'raise', label: label3, frequency: 0.05, ev: 0.5 }];
       } else {
-        freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.92, ev: 0 },
-          { action: 'call', label: 'Call', frequency: 0.08, ev: -0.4 }
-        ];
+        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.92, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.08, ev: -0.4 }];
       }
     }
   } else {
-    // Postflop (Flop, Turn, River)
-    // If communityCards is empty (e.g. browsing postflop standalone in Solution Browser), provide a standard reference board!
     let activeBoard = communityCards;
     if (!activeBoard || activeBoard.length === 0) {
-      activeBoard = [
-        createCard('A', 'c'),
-        createCard('T', 'd'),
-        createCard('7', 's')
-      ];
-      if (street === 'turn' || street === 'river') {
-        activeBoard.push(createCard('2', 'h'));
-      }
-      if (street === 'river') {
-        activeBoard.push(createCard('K', 'h'));
-      }
+      activeBoard = [createCard('A', 'c'), createCard('T', 'd'), createCard('7', 's')];
+      if (street === 'turn' || street === 'river') activeBoard.push(createCard('2', 'h'));
+      if (street === 'river') activeBoard.push(createCard('K', 'h'));
     }
 
-    const allCards = [c1, c2, ...activeBoard];
-    const handEval = evaluate7Cards(allCards);
+    boardTexture = detectBoardTexture(activeBoard);
+    const isWet     = boardTexture === 'wet' || boardTexture === 'very_wet';
+    const isTurnRiv = street === 'turn' || street === 'river';
+    const P = potSize;
+
+    const handEval  = evaluate7Cards([c1, c2, ...activeBoard]);
     const cat = handEval.category;
+    const isNutHand  = cat === 'Straight Flush' || cat === 'Four of a Kind' || cat === 'Full House';
+    const isMonster  = isNutHand || cat === 'Flush' || cat === 'Straight' || cat === 'Three of a Kind';
+    const isTwoPair  = cat === 'Two Pair';
+    const isPairHand = cat === 'One Pair';
     const isFacingBet = currentHighBet > 0;
 
-    const isMonster = cat === 'Straight Flush' || cat === 'Four of a Kind' || cat === 'Full House' || cat === 'Flush' || cat === 'Straight' || cat === 'Three of a Kind';
-    const isTwoPair = cat === 'Two Pair';
-    const isPairHand = cat === 'One Pair';
-
     if (!isFacingBet) {
-      if (isMonster || isTwoPair) {
+      if (isNutHand && isTurnRiv) {
         freqs = [
-          { action: 'check', label: 'Check', frequency: 0.25, ev: potSize * 0.5 },
-          { action: 'bet_33', label: 'Bet 33% Pot', frequency: 0.40, ev: potSize * 0.65 },
-          { action: 'bet_75', label: 'Bet 75% Pot', frequency: 0.35, ev: potSize * 0.70 }
+          { action: 'check',   label: 'Check',        frequency: 0.10, ev: P*0.55, potFraction: 0    },
+          { action: 'bet_75',  label: 'Bet 75% Pot',  frequency: 0.20, ev: P*0.75, potFraction: 0.75 },
+          { action: 'bet_100', label: 'Bet 100% Pot', frequency: 0.25, ev: P*0.82, potFraction: 1.00 },
+          { action: 'bet_150', label: 'Bet 150% Pot', frequency: 0.45, ev: P*0.90, potFraction: 1.50 },
         ];
+      } else if (isMonster) {
+        if (isWet) {
+          freqs = [
+            { action: 'check',   label: 'Check',        frequency: 0.15, ev: P*0.50, potFraction: 0    },
+            { action: 'bet_50',  label: 'Bet 50% Pot',  frequency: 0.10, ev: P*0.65, potFraction: 0.50 },
+            { action: 'bet_67',  label: 'Bet 67% Pot',  frequency: 0.45, ev: P*0.72, potFraction: 0.67 },
+            { action: 'bet_75',  label: 'Bet 75% Pot',  frequency: 0.25, ev: P*0.70, potFraction: 0.75 },
+            { action: 'bet_100', label: 'Bet 100% Pot', frequency: 0.05, ev: P*0.68, potFraction: 1.00 },
+          ];
+        } else {
+          freqs = [
+            { action: 'check',  label: 'Check',        frequency: 0.15, ev: P*0.48, potFraction: 0    },
+            { action: 'bet_33', label: 'Bet 33% Pot',  frequency: 0.45, ev: P*0.68, potFraction: 0.33 },
+            { action: 'bet_50', label: 'Bet 50% Pot',  frequency: 0.25, ev: P*0.65, potFraction: 0.50 },
+            { action: 'bet_75', label: 'Bet 75% Pot',  frequency: 0.15, ev: P*0.62, potFraction: 0.75 },
+          ];
+        }
+      } else if (isTwoPair) {
+        if (isWet) {
+          freqs = [
+            { action: 'check',   label: 'Check',        frequency: 0.20, ev: P*0.45, potFraction: 0    },
+            { action: 'bet_50',  label: 'Bet 50% Pot',  frequency: 0.10, ev: P*0.58, potFraction: 0.50 },
+            { action: 'bet_67',  label: 'Bet 67% Pot',  frequency: 0.40, ev: P*0.65, potFraction: 0.67 },
+            { action: 'bet_75',  label: 'Bet 75% Pot',  frequency: 0.25, ev: P*0.63, potFraction: 0.75 },
+            { action: 'bet_100', label: 'Bet 100% Pot', frequency: 0.05, ev: P*0.60, potFraction: 1.00 },
+          ];
+        } else {
+          freqs = [
+            { action: 'check',  label: 'Check',        frequency: 0.20, ev: P*0.42, potFraction: 0    },
+            { action: 'bet_33', label: 'Bet 33% Pot',  frequency: 0.50, ev: P*0.60, potFraction: 0.33 },
+            { action: 'bet_50', label: 'Bet 50% Pot',  frequency: 0.20, ev: P*0.57, potFraction: 0.50 },
+            { action: 'bet_75', label: 'Bet 75% Pot',  frequency: 0.10, ev: P*0.55, potFraction: 0.75 },
+          ];
+        }
       } else if (isPairHand) {
-        freqs = [
-          { action: 'check', label: 'Check', frequency: 0.60, ev: potSize * 0.35 },
-          { action: 'bet_33', label: 'Bet 33% Pot', frequency: 0.35, ev: potSize * 0.40 },
-          { action: 'bet_75', label: 'Bet 75% Pot', frequency: 0.05, ev: potSize * 0.30 }
-        ];
+        if (isWet || isTurnRiv) {
+          freqs = [
+            { action: 'check',  label: 'Check',       frequency: 0.70, ev: P*0.35, potFraction: 0    },
+            { action: 'bet_33', label: 'Bet 33% Pot', frequency: 0.20, ev: P*0.38, potFraction: 0.33 },
+            { action: 'bet_50', label: 'Bet 50% Pot', frequency: 0.10, ev: P*0.33, potFraction: 0.50 },
+          ];
+        } else {
+          freqs = [
+            { action: 'check',  label: 'Check',       frequency: 0.55, ev: P*0.35, potFraction: 0    },
+            { action: 'bet_33', label: 'Bet 33% Pot', frequency: 0.30, ev: P*0.42, potFraction: 0.33 },
+            { action: 'bet_50', label: 'Bet 50% Pot', frequency: 0.15, ev: P*0.38, potFraction: 0.50 },
+          ];
+        }
       } else {
-        freqs = [
-          { action: 'check', label: 'Check', frequency: 0.85, ev: potSize * 0.1 },
-          { action: 'bet_33', label: 'Bet 33% Pot', frequency: 0.15, ev: potSize * 0.12 }
-        ];
+        if (isWet) {
+          freqs = [
+            { action: 'check',  label: 'Check',       frequency: 0.70, ev: P*0.08, potFraction: 0    },
+            { action: 'bet_33', label: 'Bet 33% Pot', frequency: 0.10, ev: P*0.10, potFraction: 0.33 },
+            { action: 'bet_67', label: 'Bet 67% Pot', frequency: 0.20, ev: P*0.14, potFraction: 0.67 },
+          ];
+        } else {
+          freqs = [
+            { action: 'check',  label: 'Check',       frequency: 0.87, ev: P*0.10, potFraction: 0    },
+            { action: 'bet_33', label: 'Bet 33% Pot', frequency: 0.13, ev: P*0.12, potFraction: 0.33 },
+          ];
+        }
       }
     } else {
-      if (isMonster) {
+      if (isNutHand && isTurnRiv) {
         freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 },
-          { action: 'call', label: 'Call', frequency: 0.40, ev: potSize * 0.75 },
-          { action: 'raise', label: 'Raise', frequency: 0.60, ev: potSize * 0.90 }
+          { action: 'fold',  label: 'Fold',             frequency: 0.00, ev: 0      },
+          { action: 'call',  label: 'Call',              frequency: 0.20, ev: P*0.80 },
+          { action: 'raise', label: 'Raise (Overbet)',   frequency: 0.80, ev: P*0.95 },
         ];
+      } else if (isMonster) {
+        if (isWet) {
+          freqs = [
+            { action: 'fold',  label: 'Fold',       frequency: 0.00, ev: 0      },
+            { action: 'call',  label: 'Call',        frequency: 0.30, ev: P*0.78 },
+            { action: 'raise', label: 'Raise 67%',   frequency: 0.70, ev: P*0.92 },
+          ];
+        } else {
+          freqs = [
+            { action: 'fold',  label: 'Fold',  frequency: 0.00, ev: 0      },
+            { action: 'call',  label: 'Call',   frequency: 0.40, ev: P*0.75 },
+            { action: 'raise', label: 'Raise',  frequency: 0.60, ev: P*0.90 },
+          ];
+        }
       } else if (isTwoPair) {
         freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.05, ev: 0 },
-          { action: 'call', label: 'Call', frequency: 0.75, ev: potSize * 0.55 },
-          { action: 'raise', label: 'Raise', frequency: 0.20, ev: potSize * 0.65 }
+          { action: 'fold',  label: 'Fold',  frequency: 0.05,                    ev: 0      },
+          { action: 'call',  label: 'Call',  frequency: isWet ? 0.65 : 0.75,     ev: P*0.55 },
+          { action: 'raise', label: 'Raise', frequency: isWet ? 0.30 : 0.20,     ev: P*0.65 },
         ];
       } else if (isPairHand) {
         freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.35, ev: 0 },
-          { action: 'call', label: 'Call', frequency: 0.60, ev: potSize * 0.30 },
-          { action: 'raise', label: 'Raise', frequency: 0.05, ev: potSize * 0.20 }
+          { action: 'fold',  label: 'Fold',  frequency: isWet ? 0.45 : 0.35,    ev: 0      },
+          { action: 'call',  label: 'Call',  frequency: isWet ? 0.50 : 0.60,    ev: P*0.30 },
+          { action: 'raise', label: 'Raise', frequency: 0.05,                    ev: P*0.20 },
         ];
       } else {
         freqs = [
-          { action: 'fold', label: 'Fold', frequency: 0.90, ev: 0 },
-          { action: 'call', label: 'Call', frequency: 0.10, ev: -0.3 }
+          { action: 'fold', label: 'Fold', frequency: 0.90, ev: 0    },
+          { action: 'call', label: 'Call',  frequency: 0.10, ev: -0.3 },
         ];
       }
     }
@@ -244,12 +297,5 @@ export function getGtoStrategyForState(
 
   const optimalAction = [...freqs].sort((a, b) => b.ev - a.ev || b.frequency - a.frequency)[0];
 
-  return {
-    nodeId: `${street}_${position}_${handKey}`,
-    handKey,
-    position,
-    street,
-    frequencies: freqs,
-    optimalAction
-  };
+  return { nodeId: `${street}_${position}_${handKey}`, handKey, position, street, frequencies: freqs, optimalAction, boardTexture };
 }

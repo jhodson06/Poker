@@ -4,69 +4,12 @@ import gsap from 'gsap';
 import { TableState } from '../engine/stateMachine';
 import { Card, SUIT_SYMBOLS, RANKS } from '../engine/card';
 import { evaluate7Cards } from '../engine/evaluator';
+import { calculateTableEquities } from '../engine/equityCalculator';
 
 interface PokerTableCanvasProps {
   tableState: TableState;
   revealAllCards?: boolean;
   showEquityOverlays?: boolean;
-}
-
-function getRawPreflopEquity(c1Val: number, c2Val: number, isSuited: boolean): number {
-  const highVal = Math.max(c1Val, c2Val);
-  const lowVal = Math.min(c1Val, c2Val);
-  const isPair = c1Val === c2Val;
-
-  if (isPair) return Math.round(50 + highVal * 2.8);
-  let base = highVal * 2.2 + lowVal * 1.4;
-  if (isSuited) base += 4;
-  if (highVal - lowVal <= 2) base += 3;
-  return Math.min(85, Math.max(22, Math.round(base)));
-}
-
-function calculateTableEquities(state: TableState): Map<number, number> {
-  const equityMap = new Map<number, number>();
-  const activePlayers = state.players.filter(p => !p.isFolded && p.holeCards.length === 2);
-
-  if (activePlayers.length === 0) return equityMap;
-  if (activePlayers.length === 1) {
-    equityMap.set(activePlayers[0].seatIndex, 100);
-    return equityMap;
-  }
-
-  const rawWeights: { seatIndex: number; weight: number }[] = [];
-
-  activePlayers.forEach(p => {
-    const c1 = p.holeCards[0];
-    const c2 = p.holeCards[1];
-    let weight = 50;
-
-    if (!state.communityCards || state.communityCards.length < 3) {
-      const isSuited = c1.suit === c2.suit;
-      weight = getRawPreflopEquity(c1.value, c2.value, isSuited);
-    } else {
-      const evalResult = evaluate7Cards([...p.holeCards, ...state.communityCards]);
-      const relStr = Math.max(1, (10000000 - evalResult.score) / 100000);
-      weight = relStr * relStr;
-    }
-
-    rawWeights.push({ seatIndex: p.seatIndex, weight });
-  });
-
-  const totalWeight = rawWeights.reduce((sum, item) => sum + item.weight, 0);
-  if (totalWeight <= 0) return equityMap;
-
-  let sumEq = 0;
-  rawWeights.forEach((item, idx) => {
-    let eq = Math.round((item.weight / totalWeight) * 100);
-    if (idx === rawWeights.length - 1) {
-      eq = Math.max(1, 100 - sumEq);
-    } else {
-      sumEq += eq;
-    }
-    equityMap.set(item.seatIndex, eq);
-  });
-
-  return equityMap;
 }
 
 export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({
@@ -177,8 +120,9 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({
     potBg.fill({ color: 0x0f172a, alpha: 0.94 });
     potBg.stroke({ color: 0x10b981, width: 2.5 });
 
+    const toBB = (chips: number) => (chips / state.bigBlind).toFixed(1).replace('.0', '');
     const potText = new PIXI.Text({
-      text: `POT: ${state.pot} BB`,
+      text: `POT: ${toBB(state.pot)} BB`,
       style: {
         fontFamily: 'Outfit, sans-serif',
         fontSize: 16,
@@ -199,7 +143,8 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({
       const isShowdown = state.street === 'showdown';
       const dealtCount = state.communityCards ? state.communityCards.length : 0;
       const phantom = state.phantomCommunityCards || [];
-      const totalSlots = isShowdown ? Math.max(5, dealtCount, phantom.length) : dealtCount;
+      // Only show phantom runout cards if hand actually reached postflop (dealtCount > 0)
+      const totalSlots = isShowdown && dealtCount > 0 ? Math.max(5, dealtCount, phantom.length) : dealtCount;
 
       if (totalSlots > 0) {
         const cardSpacing = 56;
@@ -374,10 +319,12 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({
         actionTag.addChild(tagBg, tagText);
         seatGroup.addChild(actionTag);
       }
+      // HELPER: Convert raw chips to BB for display
+      const toBB = (chips: number) => (chips / state.bigBlind).toFixed(1).replace('.0', '');
 
       // STACK COUNT BELOW ACTION TAG: y = 50
       const stackText = new PIXI.Text({
-        text: `${player.chips} BB`,
+        text: `${toBB(player.chips)} BB`,
         style: {
           fontFamily: 'JetBrains Mono, monospace',
           fontSize: 11,
@@ -499,7 +446,7 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({
         betBadgeBg.stroke({ color: 0x38bdf8, width: 1.5 });
 
         const betBadgeText = new PIXI.Text({
-          text: `${player.currentBet} BB`,
+          text: `${toBB(player.currentBet)} BB`,
           style: {
             fontFamily: 'JetBrains Mono, monospace',
             fontSize: 10,
@@ -535,7 +482,7 @@ export const PokerTableCanvas: React.FC<PokerTableCanvasProps> = ({
         const p = state.players[w.seatIndex];
         const isHero = p?.isHuman || w.name === 'You';
         const nameStr = p ? (p.isHuman ? 'You' : p.position) : w.name;
-        return `${nameStr} ${isHero ? 'win' : 'wins'} ${w.amount} BB`;
+        return `${nameStr} ${isHero ? 'win' : 'wins'} ${toBB(w.amount)} BB`;
       }).join(' | ');
       const winText = new PIXI.Text({
         text: winMsg,

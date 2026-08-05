@@ -42,6 +42,12 @@ export interface TableState {
   pot: number;
   currentHighBet: number;
   minRaise: number;
+  /**
+   * Number of raises made on the current street (not counting blinds).
+   * 0 = no raise yet, 1 = first open/raise, 2 = 3-bet, 3 = 4-bet, etc.
+   * Used for position-aware sizing (3-bet vs 4-bet multipliers per PDF spec).
+   */
+  raiseCount: number;
   communityCards: Card[];
   phantomCommunityCards: Card[]; // Cards that would have been dealt if hand continued
   players: PlayerState[];
@@ -99,7 +105,8 @@ export function createInitialTableState(
     street: 'preflop',
     pot: 0,
     currentHighBet: bb,
-    minRaise: bb * 2,
+    minRaise: bb,
+    raiseCount: 0,
     communityCards: [],
     phantomCommunityCards: [],
     players,
@@ -202,7 +209,8 @@ export function startNewHand(state: TableState, forcedHeroCards?: [Card, Card] |
     street: 'preflop',
     pot,
     currentHighBet: state.bigBlind,
-    minRaise: state.bigBlind * 2,
+    minRaise: state.bigBlind,
+    raiseCount: 0,
     communityCards: [],
     phantomCommunityCards: [],
     players,
@@ -265,6 +273,10 @@ export function executePlayerAction(
     actualAction = player.isAllIn ? 'allin' : (actionType as ActionLog['action']);
   }
 
+  // Track aggression depth for 4-bet sizing logic
+  const isAggressive = actionType === 'bet' || actionType === 'raise';
+  const newRaiseCount = isAggressive ? state.raiseCount + 1 : state.raiseCount;
+
   players[seatIndex] = player;
   const pot = players.reduce((sum, p) => sum + p.totalInvested, 0);
 
@@ -284,6 +296,7 @@ export function executePlayerAction(
     pot,
     currentHighBet,
     minRaise,
+    raiseCount: newRaiseCount,
     actionLogs
   };
 
@@ -399,6 +412,7 @@ function advanceStreet(state: TableState): TableState {
       street: nextStreet,
       currentHighBet: 0,
       minRaise: state.bigBlind,
+      raiseCount: 0,
       activeSeat: firstActor
     };
     return advanceStreet(intermediateState);
@@ -412,6 +426,7 @@ function advanceStreet(state: TableState): TableState {
     street: nextStreet,
     currentHighBet: 0,
     minRaise: state.bigBlind,
+    raiseCount: 0, // Reset raise count on each new street
     activeSeat: firstActor
   };
 }

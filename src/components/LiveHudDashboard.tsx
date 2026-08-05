@@ -1,14 +1,15 @@
 import React from 'react';
-import { Award, Zap, Flame, Settings, Grid, RotateCcw, Layers, Sparkles } from 'lucide-react';
+import { Award, Zap, Flame, Settings, Grid, RotateCcw, Layers, Sparkles, TrendingDown, AlertTriangle } from 'lucide-react';
 import { SessionStats } from '../pedagogy/gtoScoreEngine';
 
 interface LiveHudDashboardProps {
   stats: SessionStats;
-  difficultyMode: 'simple' | 'grouped' | 'standard';
+  difficultyMode: 'simple' | 'standard';
   playerCount: number;
   onOpenSettings: () => void;
   onOpenSolutionBrowser: () => void;
   onOpenSandbox: () => void;
+  onOpenLeakReport: () => void;
   onResetSession: () => void;
 }
 
@@ -19,6 +20,7 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
   onOpenSettings,
   onOpenSolutionBrowser,
   onOpenSandbox,
+  onOpenLeakReport,
   onResetSession
 }) => {
   const getGtoScoreBadgeColor = (score: number) => {
@@ -74,6 +76,17 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
           </div>
         </div>
 
+        {/* EV Loss */}
+        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 transition-all duration-200 hover:scale-105 hover:border-slate-700 shadow-md">
+          <TrendingDown className={`w-4 h-4 ${stats.totalEvLossBB > 2.0 ? 'text-rose-400' : 'text-emerald-400'}`} />
+          <div className="flex flex-col">
+            <span className="text-[10px] text-slate-400 uppercase font-semibold">EV Loss</span>
+            <span className={`text-sm font-mono font-bold ${stats.totalEvLossBB > 2.0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+              -{stats.totalEvLossBB.toFixed(1)} BB
+            </span>
+          </div>
+        </div>
+
         {/* Streak */}
         <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 transition-all duration-200 hover:scale-105 hover:border-slate-700 shadow-md">
           <Flame className={`w-4 h-4 ${stats.currentStreak > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-600'}`} />
@@ -88,6 +101,19 @@ export const LiveHudDashboard: React.FC<LiveHudDashboardProps> = ({
 
       {/* Action Buttons with High-Contrast Hover Styles */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={onOpenLeakReport}
+          className="btn-poker-nav flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold shadow-md transition-all duration-200 hover:scale-105 active:scale-95 border-rose-500/30 text-rose-300 hover:text-rose-200"
+        >
+          <AlertTriangle className="w-4 h-4 text-rose-400" />
+          <span className="hidden sm:inline">Leaks</span>
+          {stats.leakRecords.length > 0 && (
+            <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center">
+              {Math.min(9, stats.leakRecords.filter(r => r.evLoss > 0).length)}
+            </span>
+          )}
+        </button>
+
         <button
           onClick={onOpenSandbox}
           className="btn-poker-nav flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold shadow-md transition-all duration-200 hover:scale-105 active:scale-95 border-purple-500/30 text-purple-300 hover:text-purple-200"
