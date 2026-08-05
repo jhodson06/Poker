@@ -1,10 +1,10 @@
 import React from 'react';
 import { CheckCircle2, AlertTriangle, XCircle, Skull, X, Shuffle, Layers } from 'lucide-react';
 import { DecisionGrading } from '../pedagogy/evCalculator';
-import { ActionFrequency, BetAction, GtoNodeStrategy } from '../gto/strategyDatabase';
+import { GtoNodeStrategy, ActionFrequency, ActionTypeDB } from '../gto/strategyDatabase';
 
 // All postflop bet actions (used for Simple Mode merging)
-const ALL_BET_ACTIONS: BetAction[] = [
+const ALL_BET_ACTIONS: ActionTypeDB[] = [
   'bet_33', 'bet_50', 'bet_67', 'bet_75',
   'bet_100', 'bet_150', 'bet_overbet', 'raise', 'allin'
 ];
@@ -60,7 +60,7 @@ function getSprInfo(spr: number): { label: string; color: string } {
 }
 
 /** Bar colour per action type */
-function barColor(action: BetAction): string {
+function barColor(action: ActionTypeDB): string {
   if (action === 'fold')        return 'bg-slate-500';
   if (action === 'check')       return 'bg-blue-500';
   if (action === 'call')        return 'bg-emerald-500';
@@ -88,7 +88,7 @@ export const FeedbackOverlay: React.FC<FeedbackOverlayProps> = ({
   // Detect indifference zone correct play (low-frequency but 0 EV loss)
   let effectiveUserFreq = grading.userActionFreq;
   if (difficultyMode === 'simple') {
-    const isBet = ALL_BET_ACTIONS.includes(grading.userMatchedAction as BetAction);
+    const isBet = ALL_BET_ACTIONS.includes(grading.userMatchedAction as ActionTypeDB);
     if (isBet) {
       const mergedBet = displayFreqs.find(f => f.label === 'Bet / Raise');
       if (mergedBet) effectiveUserFreq = mergedBet.frequency;
@@ -163,12 +163,12 @@ export const FeedbackOverlay: React.FC<FeedbackOverlayProps> = ({
             <span className="font-extrabold text-purple-300">RANGE BALANCE REMINDER · </span>
             Your choice is 0 EV loss, but GTO plays{' '}
             <span className="font-bold text-white">
-              {difficultyMode === 'simple' && ALL_BET_ACTIONS.includes(grading.userMatchedAction as BetAction)
+              {difficultyMode === 'simple' && ALL_BET_ACTIONS.includes(grading.userMatchedAction as ActionTypeDB)
                 ? 'any Raise'
                 : grading.userActionLabel}
             </span> only{' '}
             <span className="font-bold text-white">
-              {((difficultyMode === 'simple' && ALL_BET_ACTIONS.includes(grading.userMatchedAction as BetAction)
+              {((difficultyMode === 'simple' && ALL_BET_ACTIONS.includes(grading.userMatchedAction as ActionTypeDB)
                 ? effectiveUserFreq
                 : grading.userActionFreq) * 100).toFixed(0)}%
             </span> of the

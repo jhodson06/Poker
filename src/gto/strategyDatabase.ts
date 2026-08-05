@@ -1,21 +1,18 @@
-﻿import { Card, RANKS, createCard } from '../engine/card';
+import { Card, RANKS, createCard } from '../engine/card';
 import { PlayerPosition, BettingStreet } from '../engine/stateMachine';
 import { evaluate7Cards } from '../engine/evaluator';
 import { detectBoardTexture } from '../engine/betAbstraction';
+import { getStaticPreflopRange, getHandIndex, Range } from '../engine/rangeBuilder';
+import { RiverSolver, GameState } from '../engine/cfrSolver';
 
-// 8-bucket abstraction space per research AI spec:
-// 33% | 50% | 67% | 75% | 100% | 150% | overbet(133%) | allin
-export type BetAction =
-  | 'fold' | 'check' | 'call' | 'raise' | 'allin'
-  | 'bet_33' | 'bet_50' | 'bet_67' | 'bet_75'
-  | 'bet_100' | 'bet_150' | 'bet_overbet';
+export type ActionTypeDB = 'fold' | 'check' | 'call' | 'bet_33' | 'bet_50' | 'bet_67' | 'bet_75' | 'bet_100' | 'bet_150' | 'bet_overbet' | 'raise' | 'allin';
 
 export interface ActionFrequency {
-  action: BetAction;
+  action: ActionTypeDB;
   label: string;
-  frequency: number;   // 0.0-1.0
+  frequency: number;
   ev: number;
-  potFraction?: number; // for PHM blending
+  potFraction?: number;
 }
 
 export interface GtoNodeStrategy {
@@ -23,10 +20,87 @@ export interface GtoNodeStrategy {
   handKey: string;
   position: PlayerPosition;
   street: BettingStreet;
-  frequencies: ActionFrequency[];
-  optimalAction: ActionFrequency;
   boardTexture?: 'dry' | 'wet' | 'very_wet';
+  optimalAction: ActionFrequency;
+  frequencies: ActionFrequency[];
 }
+
+// --- RIVER CFR CACHE ---
+let _riverCacheKey = '';
+let _riverCacheData = new Map<number, ActionFrequency[]>();
+
+function getCachedRiverSolve(
+  board: Card[],
+  currentHighBet: number,
+  potSize: number,
+  bigBlind: number,
+  position: PlayerPosition
+): Map<number, ActionFrequency[]> | null {
+  const isP1Turn = position === 'BTN' || position === 'CO';
+  const toCall = currentHighBet > 0 ? currentHighBet : 0;
+  
+  const boardKey = board.map(c => c.value + c.suit).join('');
+  const key = `${boardKey}_${potSize}_${currentHighBet}_${isP1Turn}`;
+  
+  if (_riverCacheKey === key) return _riverCacheData;
+  
+  const state: GameState = {
+    board,
+    pot: potSize,
+    p1Stack: 100 * bigBlind,
+    p2Stack: 100 * bigBlind,
+    isP1Turn,
+    history: currentHighBet > 0 ? ['bet_67'] : [],
+    terminal: false,
+    p1Commit: isP1Turn ? 0 : toCall,
+    p2Commit: isP1Turn ? toCall : 0,
+  };
+
+  const p1Range = Range.full();
+  const p2Range = Range.full();
+  p1Range.removeBlockers(board);
+  p2Range.removeBlockers(board);
+  p1Range.normalize();
+  p2Range.normalize();
+
+  const solver = new RiverSolver(board);
+  solver.solve(state, p1Range, p2Range, 100);
+  
+  const rootInfoset = (isP1Turn ? 'P1' : 'P2') + '|' + state.history.join(',');
+  const node = (solver as any).nodeMap.get(rootInfoset);
+  
+  if (!node) return null;
+  
+  _riverCacheData.clear();
+  _riverCacheKey = key;
+  
+  for (let h = 0; h < 1326; h++) {
+    const avgStrat = solver.getAverageStrategy(rootInfoset, h);
+    if (!avgStrat) continue;
+    
+    let freqs: ActionFrequency[] = [];
+    for (let a = 0; a < node.actions.length; a++) {
+      const act = node.actions[a] as string;
+      const freq = avgStrat[a];
+      let dbAct: ActionTypeDB = 'call';
+      let label = act.toUpperCase();
+      
+      if (act === 'fold') { dbAct = 'fold'; label = 'Fold'; }
+      if (act === 'call' && toCall === 0) { dbAct = 'check'; label = 'Check'; }
+      if (act === 'call' && toCall > 0) { dbAct = 'call'; label = 'Call'; }
+      if (act === 'bet_67') { dbAct = 'bet_67'; label = 'Bet 67% Pot'; }
+      if (act === 'allin') { dbAct = 'allin'; label = 'All-In'; }
+      
+      freqs.push({ action: dbAct, label, frequency: Number(freq.toFixed(2)), ev: 0 });
+    }
+    
+    freqs.sort((a, b) => b.frequency - a.frequency);
+    _riverCacheData.set(h, freqs);
+  }
+  
+  return _riverCacheData;
+}
+// --- END CACHE ---
 
 export function getCanonicalHandKey(c1: Card, c2: Card): string {
   const r1 = c1.value, r2 = c2.value;
@@ -169,6 +243,28 @@ export function getGtoStrategyForState(
       if (street === 'turn' || street === 'river') activeBoard.push(createCard('2', 'h'));
       if (street === 'river') activeBoard.push(createCard('K', 'h'));
     }
+    
+    // --- REAL-TIME RIVER SOLVER MVP ---
+    // If it's the river, we use the real-time CFR engine!
+    if (street === 'river') {
+      const solverResult = getCachedRiverSolve(activeBoard, currentHighBet, potSize, bigBlind, position);
+      if (solverResult) {
+        const hIdx = getHandIndex(c1, c2);
+        const node = solverResult.get(hIdx);
+        const handKey = getCanonicalHandKey(c1, c2);
+        if (node) {
+           return {
+             nodeId: `river_${position}_${handKey}`,
+             handKey,
+             position,
+             street,
+             optimalAction: node[0] || { action: 'check', label: 'Check', frequency: 1.0, ev: 0 },
+             frequencies: node
+           };
+        }
+      }
+    }
+    // --- END REAL-TIME SOLVER ---
 
     boardTexture = detectBoardTexture(activeBoard);
     const isWet     = boardTexture === 'wet' || boardTexture === 'very_wet';
