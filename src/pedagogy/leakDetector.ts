@@ -167,9 +167,7 @@ export function generateLeakReport(records: LeakRecord[]): LeakReport {
     return drill;
   });
 
-  const trueTotalEvLoss = records.reduce((s, r) => s + r.evLoss, 0);
-
-  return { topLeaks, drillRecommendations, totalDecisions: records.length, decisionsWithErrors, totalEvLoss: trueTotalEvLoss, hasEnoughData };
+  return { topLeaks, drillRecommendations, totalDecisions: records.length, decisionsWithErrors, totalEvLoss: trueTotalEvLoss, hasEnoughData: true };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
