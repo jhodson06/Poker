@@ -272,7 +272,11 @@ export function evaluateUserDecision(
   // mathematically indifferent (same EV). The research AI explicitly validates:
   // "An action should be graded as Correct without penalty as long as the EV loss
   //  is less than 0.5 Big Blinds, even if the user selected a lower-frequency option."
-  if (rawEvLoss < 0.5) {
+  // Preflop indifference is much tighter because the pot is small (1.5-3 BB)
+  // Postflop pots are larger, so 0.5 BB is an acceptable indifference zone.
+  const indifferenceThreshold = isPreflop ? 0.05 : 0.5;
+
+  if (rawEvLoss <= indifferenceThreshold) {
     return {
       userActionLabel: effectiveUserLabel,
       userActionFreq: userFreqItem.frequency,
@@ -284,7 +288,7 @@ export function evaluateUserDecision(
       colorHex: '#10b981',
       badgeBgClass: 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400',
       badgeTextClass: 'text-emerald-400',
-      explanation: `Correct play! ${userFreqItem.label} is within the GTO indifference zone (<0.5 BB EV loss). Solvers frequently mix between actions with near-equal EV — this choice is mathematically sound.`,
+      explanation: `Correct play! ${userFreqItem.label} is within the GTO indifference zone (<${indifferenceThreshold} BB EV loss). Solvers frequently mix between actions with near-equal EV — this choice is mathematically sound.`,
       optimalActionLabel: optimalAction.label
     };
   }
