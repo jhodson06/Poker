@@ -64,7 +64,7 @@ function getCachedRiverSolve(
   p2Range.normalize();
 
   const solver = new RiverSolver(board);
-  solver.solve(state, p1Range, p2Range, 100);
+  solver.solve(state, p1Range, p2Range, 20);
   
   const rootInfoset = (isP1Turn ? 'P1' : 'P2') + '|' + state.history.join(',');
   const node = (solver as any).nodeMap.get(rootInfoset);
