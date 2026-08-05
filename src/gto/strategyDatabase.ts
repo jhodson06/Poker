@@ -113,72 +113,32 @@ export function getCanonicalHandKey(c1: Card, c2: Card): string {
 function isInPosition(p: PlayerPosition)   { return p === 'BTN' || p === 'CO'; }
 function isLatePosition(p: PlayerPosition) { return p === 'BTN' || p === 'CO' || p === 'SB'; }
 
-function getPreflopRfiFrequency(highVal: number, lowVal: number, isPair: boolean, isSuited: boolean, position: PlayerPosition): number {
-  if (position === 'BB') return 0.0;
-  if (isPair) {
-    if (position === 'UTG') return highVal >= 4 ? 1.0 : (highVal >= 2 ? 0.5 : 0.0);
-    if (position === 'MP')  return highVal >= 2 ? 1.0 : 0.5;
-    return 1.0;
+// Preflop Charts
+import { RFI_CHARTS, VS_OPEN_CHARTS, FACING_3BET, FACING_4BET, buildChartMatrix } from './preflopCharts';
+
+// Pre-build the chart matrices for fast lookups
+const RFI_MATRIX = new Map();
+for (const [pos, mapping] of Object.entries(RFI_CHARTS)) {
+  RFI_MATRIX.set(pos, buildChartMatrix(mapping));
+}
+
+const VS_OPEN_MATRIX = new Map();
+for (const [opener, responses] of Object.entries(VS_OPEN_CHARTS)) {
+  const innerMap = new Map();
+  for (const [pos, mapping] of Object.entries(responses)) {
+    innerMap.set(pos, buildChartMatrix(mapping));
   }
-  if (isSuited) {
-    if (highVal === 12) {
-      if (position === 'UTG') return lowVal >= 8 || lowVal <= 3 ? 1.0 : 0.0;
-      if (position === 'MP')  return lowVal >= 6 || lowVal <= 3 ? 1.0 : 0.5;
-      return 1.0;
-    }
-    if (highVal === 11) {
-      if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0;
-      if (position === 'MP')  return lowVal >= 7 ? 1.0 : 0.0;
-      if (position === 'CO')  return lowVal >= 3 ? 1.0 : 0.0;
-      return 1.0;
-    }
-    if (highVal === 10) {
-      if (position === 'UTG') return lowVal >= 8 ? 1.0 : 0.0;
-      if (position === 'MP')  return lowVal >= 7 ? 1.0 : (lowVal === 6 ? 0.5 : 0.0);
-      if (position === 'CO')  return lowVal >= 4 ? 1.0 : 0.0;
-      return 1.0;
-    }
-    if (highVal === 9) {
-      if (position === 'UTG') return lowVal === 8 ? 1.0 : 0.0;
-      if (position === 'MP')  return lowVal >= 7 ? 1.0 : 0.0;
-      if (position === 'CO')  return lowVal >= 5 ? 1.0 : 0.0;
-      return lowVal >= 2 ? 1.0 : 0.0;
-    }
-    if (highVal === 8) {
-      if (position === 'UTG') return lowVal === 7 ? 0.5 : 0.0;
-      if (position === 'MP')  return lowVal >= 6 ? 1.0 : 0.0;
-      if (position === 'CO')  return lowVal >= 5 ? 1.0 : 0.0;
-      return lowVal >= 4 ? 1.0 : 0.0;
-    }
-    if (highVal - lowVal <= 2 && highVal >= 3) {
-      if (position === 'UTG') return 0.0;
-      if (position === 'MP')  return highVal >= 5 ? 0.6 : 0.0;
-      return 1.0;
-    }
-    return position === 'BTN' ? (highVal >= 4 ? 1.0 : 0.0) : 0.0;
-  }
-  if (highVal === 12) {
-    if (position === 'UTG') return lowVal >= 9 ? 1.0 : 0.0;
-    if (position === 'MP')  return lowVal >= 8 ? 1.0 : 0.0;
-    if (position === 'CO')  return lowVal >= 7 ? 1.0 : 0.0;
-    return 1.0;
-  }
-  if (highVal === 11) {
-    if (position === 'UTG') return lowVal === 10 ? 1.0 : 0.0;
-    if (position === 'MP')  return lowVal >= 9 ? 1.0 : 0.0;
-    if (position === 'CO')  return lowVal >= 8 ? 1.0 : 0.0;
-    return lowVal >= 5 ? 1.0 : 0.0;
-  }
-  if (highVal === 10) {
-    if (position === 'UTG' || position === 'MP') return 0.0;
-    if (position === 'CO')  return lowVal === 9 ? 1.0 : 0.0;
-    return lowVal >= 7 ? 1.0 : 0.0;
-  }
-  if (highVal === 9) {
-    if (position === 'BTN' || position === 'SB') return lowVal >= 7 ? 1.0 : 0.0;
-    return 0.0;
-  }
-  return 0.0;
+  VS_OPEN_MATRIX.set(opener, innerMap);
+}
+
+const FACING_3BET_MATRIX = new Map();
+for (const [pos, mapping] of Object.entries(FACING_3BET)) {
+  FACING_3BET_MATRIX.set(pos, buildChartMatrix(mapping));
+}
+
+const FACING_4BET_MATRIX = new Map();
+for (const [pos, mapping] of Object.entries(FACING_4BET)) {
+  FACING_4BET_MATRIX.set(pos, buildChartMatrix(mapping));
 }
 
 export function getGtoStrategyForState(
@@ -189,7 +149,8 @@ export function getGtoStrategyForState(
   potSize: number,
   bigBlind: number,
   communityCards: Card[] = [],
-  raiseCount: number = 0
+  raiseCount: number = 0,
+  history: any[] = [] // Optional history to determine the opener
 ): GtoNodeStrategy {
   const handKey  = getCanonicalHandKey(c1, c2);
   const r1 = c1.value, r2 = c2.value;
@@ -205,36 +166,95 @@ export function getGtoStrategyForState(
 
   if (street === 'preflop') {
     const isFacingRaise = currentHighBet > bigBlind;
+    const is3BetSpot    = isFacingRaise && raiseCount === 1;
     const is4BetSpot    = raiseCount >= 2;
+    const is5BetSpot    = raiseCount >= 3;
+
+    // Default basic EV estimates for preflop actions
+    const getEv = (action: string) => {
+      if (action === 'fold') return 0;
+      if (action.includes('raise')) return 1.5;
+      if (action.includes('call')) return 0.5;
+      return 0;
+    };
 
     if (!isFacingRaise) {
-      const rFreq     = getPreflopRfiFrequency(highVal, lowVal, isPair, isSuited, position);
-      const baseEv    = (lp ? 2.5 : 2.0) + highVal * 0.3;
+      // 1. RFI
+      const matrix = RFI_MATRIX.get(position);
+      const handActions = matrix ? matrix.get(handKey) : { fold: 1.0 };
       const openLabel = lp ? 'Raise 3x BB' : 'Raise 2.5x BB';
-      if (rFreq === 0) {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 1.0, ev: 0 }, { action: 'raise', label: openLabel, frequency: 0.0, ev: -0.2 }];
-      } else if (rFreq === 1.0) {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 }, { action: 'raise', label: openLabel, frequency: 1.0, ev: baseEv }];
-      } else {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: Number((1 - rFreq).toFixed(2)), ev: 0 }, { action: 'raise', label: openLabel, frequency: rFreq, ev: 1.0 + highVal * 0.1 }];
+      
+      for (const [act, freq] of Object.entries(handActions || { fold: 1.0 })) {
+        if (freq as number > 0) {
+          const actionType = act.includes('raise') ? 'raise' : 'fold';
+          freqs.push({
+            action: actionType as any,
+            label: actionType === 'raise' ? openLabel : 'Fold',
+            frequency: freq as number,
+            ev: getEv(act)
+          });
+        }
       }
-    } else if (is4BetSpot) {
-      if (highVal >= 11 && (isPair || isSuited)) {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 }, { action: 'call', label: 'Call', frequency: ip ? 0.30 : 0.20, ev: 5.5 }, { action: 'raise', label: ip ? '4-Bet 2.3x' : '4-Bet 2.8x', frequency: ip ? 0.70 : 0.80, ev: 9.0 }];
-      } else if (isPair && highVal >= 6) {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.50, ev: 0 }, { action: 'call', label: 'Call', frequency: ip ? 0.35 : 0.30, ev: 2.5 }, { action: 'raise', label: ip ? '4-Bet 2.3x' : '4-Bet 2.8x', frequency: ip ? 0.15 : 0.20, ev: 1.8 }];
-      } else {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.88, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.12, ev: -0.5 }];
+    } else if (is3BetSpot) {
+      // 2. Facing an Open
+      // We need to know who the opener was. For MVP, assume UTG if early, otherwise roughly BTN.
+      let opener = 'UTG';
+      if (position === 'SB' || position === 'BB') opener = 'BTN';
+      else if (position === 'BTN') opener = 'CO';
+      
+      const matrix = VS_OPEN_MATRIX.get(opener)?.get(position) || VS_OPEN_MATRIX.get('UTG')?.get(position);
+      const handActions = matrix ? matrix.get(handKey) : { fold: 1.0 };
+      const raiseLabel = ip ? '3-Bet 3x' : '3-Bet 4x';
+      
+      for (const [act, freq] of Object.entries(handActions || { fold: 1.0 })) {
+        if (freq as number > 0) {
+          const actionType = act.includes('raise') ? 'raise' : act.includes('call') ? 'call' : 'fold';
+          freqs.push({
+            action: actionType as any,
+            label: actionType === 'raise' ? raiseLabel : actionType === 'call' ? 'Call' : 'Fold',
+            frequency: freq as number,
+            ev: getEv(act)
+          });
+        }
+      }
+    } else if (is4BetSpot && !is5BetSpot) {
+      // 3. Facing a 3-Bet
+      const matrix = FACING_3BET_MATRIX.get(position);
+      const handActions = matrix ? matrix.get(handKey) : { fold: 1.0 };
+      const raiseLabel = ip ? '4-Bet 2.3x' : '4-Bet 2.8x';
+      
+      for (const [act, freq] of Object.entries(handActions || { fold: 1.0 })) {
+        if (freq as number > 0) {
+          const actionType = act.includes('raise') ? 'raise' : act.includes('call') ? 'call' : 'fold';
+          freqs.push({
+            action: actionType as any,
+            label: actionType === 'raise' ? raiseLabel : actionType === 'call' ? 'Call' : 'Fold',
+            frequency: freq as number,
+            ev: getEv(act)
+          });
+        }
       }
     } else {
-      const label3 = ip ? '3-Bet 3x' : '3-Bet 4x';
-      if (highVal >= 11 && (isPair || isSuited)) {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.0, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.35, ev: 4.2 }, { action: 'raise', label: label3, frequency: 0.65, ev: 6.8 }];
-      } else if (isPair || highVal >= 10) {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.65, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.30, ev: 1.2 }, { action: 'raise', label: label3, frequency: 0.05, ev: 0.5 }];
-      } else {
-        freqs = [{ action: 'fold', label: 'Fold', frequency: 0.92, ev: 0 }, { action: 'call', label: 'Call', frequency: 0.08, ev: -0.4 }];
+      // 4. Facing a 4-Bet or 5-Bet Shove
+      const matrix = FACING_4BET_MATRIX.get(position);
+      const handActions = matrix ? matrix.get(handKey) : { fold: 1.0 };
+      
+      for (const [act, freq] of Object.entries(handActions || { fold: 1.0 })) {
+        if (freq as number > 0) {
+          const actionType = act.includes('raise') ? 'allin' : act.includes('call') ? 'call' : 'fold';
+          freqs.push({
+            action: actionType as any,
+            label: actionType === 'allin' ? '5-Bet All-In' : actionType === 'call' ? 'Call' : 'Fold',
+            frequency: freq as number,
+            ev: getEv(act)
+          });
+        }
       }
+    }
+    
+    // Fallback if freqs is empty
+    if (freqs.length === 0) {
+       freqs.push({ action: 'fold', label: 'Fold', frequency: 1.0, ev: 0 });
     }
   } else {
     let activeBoard = communityCards;
