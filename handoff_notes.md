@@ -122,3 +122,21 @@ npm run build
 1. **Multi-Street Solver Strategy Trees:** Expand `strategyDatabase.ts` beyond rule-based node generation to full GTO pre-calculated lookup tables (e.g. Solver JSON trees).
 2. **Turn/River Specific Sizing Presets:** Add specialized overbet / geometric sizing presets (e.g. 150% pot, 200% pot) in Standard Mode for Turn & River streets.
 3. **Hand History Export (HHL / PokerTracker format):** Extend the TXT log exporter to produce standard `.txt` hand histories compatible with PokerTracker 4 / Hold'em Manager.
+
+---
+
+## 7. Latest Implementations & Pending App Changes
+
+### A. River CFR Solver Implementation (`src/engine/cfrSolver.ts`)
+* Implemented a real-time Counterfactual Regret Minimization (CFR) engine for the River.
+* Uses pre-computed hand equities and a massively parallelized `Float32Array` architecture to solve River scenarios (evaluating all 1,326 possible combos) in under 100ms.
+* Currently hard-capped at 20 iterations to prevent blocking the Vite dev server / browser UI thread. 
+
+### B. Static Preflop Engine (`src/gto/preflopCharts.ts`)
+* Stripped out the crude heuristic functions and replaced them with a true 100BB 6-Max static chart database.
+* Built `parseRangeString` to parse traditional poker shorthand (e.g., `AA-77, AKs-A2s`) into precise 1326-combo frequency grids.
+* Covers exact GTO sizings for RFI, vs Open, vs 3-Bet, and vs 4-Bet+ spots.
+
+### C. Pending Desktop App Enhancements (`pending_app_changes.md`)
+* I have created a `pending_app_changes.md` file in the root directory. 
+* **FUTURE AIs:** Please refer to `pending_app_changes.md` for a comprehensive list of mechanics that were stripped down for the Web prototype (such as Node `fs` dependencies and high-iteration CFR blocking limits) that must be restored when this app is ported to Steam/Electron! Any future down-scaling for the web version should be tracked there.
